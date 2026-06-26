@@ -1,0 +1,20 @@
+{
+  "name": "@livestock/hub-core",
+  "version": "0.1.0",
+  "description": "Shared hub mechanics for the livestock platform.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./auth/oidc": "./src/auth/oidc.js",
+    "./auth/plugin": "./src/auth/plugin.js",
+    "./auth/session": "./src/auth/session.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@livestock/infrastructure": "file:../../infrastructure",
+    "jose": "6.2.3"
+  }
+}
