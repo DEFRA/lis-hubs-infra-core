@@ -7,7 +7,7 @@ import {
   getHubJwtCookieOptions,
   getReturnUrlFromRequest,
   issueHubJwt
-} from '@livestock/infrastructure/auth'
+} from '@livestock/ui-services/auth'
 
 function createLoginController({
   getCookieOptions,
@@ -111,10 +111,7 @@ function createLogoutController({
   }
 }
 
-export function createHubCookieOptions({
-  ttlSeconds,
-  isSecure
-}) {
+export function createHubCookieOptions({ ttlSeconds, isSecure }) {
   return getHubJwtCookieOptions({
     ttlSeconds,
     isSecure
