@@ -10,7 +10,7 @@ import {
 import {
   getReturnUrlFromRequest,
   sanitizeReturnUrl
-} from '@livestock/infrastructure/auth'
+} from '@livestock/ui-services/auth'
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options)

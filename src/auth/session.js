@@ -15,7 +15,7 @@ export function createHubAuthFlow({
 }
 
 export function getHubAuthFlow(request) {
-  return request?.yar?.get ? request.yar.get(authFlowKey) ?? null : null
+  return request?.yar?.get ? (request.yar.get(authFlowKey) ?? null) : null
 }
 
 export function setHubAuthFlow(request, authFlow) {
@@ -27,7 +27,7 @@ export function clearHubAuthFlow(request) {
 }
 
 export function getHubAuthSession(request) {
-  return request?.yar?.get ? request.yar.get(authSessionKey) ?? null : null
+  return request?.yar?.get ? (request.yar.get(authSessionKey) ?? null) : null
 }
 
 export function setHubAuthSession(request, authSession) {

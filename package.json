@@ -14,7 +14,7 @@
     "node": ">=24"
   },
   "dependencies": {
-    "@livestock/infrastructure": "file:../../infrastructure",
+    "@livestock/ui-services": "file:../../infra/ui-services",
     "jose": "6.2.3"
   }
 }
