@@ -10,3 +10,8 @@ coverage
 .envrc
 tsconfig.tsbuildinfo
 .env
+
+# TODO: remove once @livestock deps are published to a proper registry.
+# Ignored for now because the lockfile resolves @livestock from the local
+# Verdaccio / monorepo paths, which CI/CDP cannot reach.
+package-lock.json
