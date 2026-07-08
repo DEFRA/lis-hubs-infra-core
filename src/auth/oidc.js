@@ -12,27 +12,61 @@ import {
   sanitizeReturnUrl
 } from '@livestock/ui-services/auth'
 
-async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options)
+class OidcClient {
+  #getProviderConfig
+  #getHubOrigin
+  #getPrimaryProviderId
+  #mapUser
+  #providerMetadata = new Map()
+  #providerJwks = new Map()
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch ${url}: ${response.status}`)
+  constructor({ getProviderConfig, getHubOrigin, getPrimaryProviderId, mapUser }) {
+    this.#getProviderConfig = getProviderConfig
+    this.#getHubOrigin = getHubOrigin
+    this.#getPrimaryProviderId = getPrimaryProviderId
+    this.#mapUser = mapUser
   }
 
-  return response.json()
-}
+  async #fetchJson(url, options = {}) {
+    const response = await fetch(url, options)
 
-export function createOidcClient({
-  getProviderConfig,
-  getHubOrigin,
-  getPrimaryProviderId,
-  mapUser
-}) {
-  const providerMetadata = new Map()
-  const providerJwks = new Map()
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${url}: ${response.status}`)
+    }
 
-  function resolveProviderId(providerId) {
-    const resolvedProviderId = providerId ?? getPrimaryProviderId?.()
+    return response.json()
+  }
+
+  #validateAuthorizationFlow(authFlow, providerId, request) {
+    if (!authFlow?.state || !authFlow?.nonce || !providerId) {
+      throw new Error('Authentication flow session was not found')
+    }
+
+    if (request.query?.state !== authFlow.state) {
+      throw new Error('State mismatch')
+    }
+
+    if (!request.query?.code) {
+      throw new Error('Authorization code was not returned')
+    }
+  }
+
+  #validateIdTokenClaims(payload, authFlow, providerConfig) {
+    if (payload.nonce !== authFlow.nonce) {
+      throw new Error('Nonce mismatch')
+    }
+
+    if (
+      providerConfig.serviceId &&
+      payload.serviceId &&
+      payload.serviceId !== providerConfig.serviceId
+    ) {
+      throw new Error('Unexpected serviceId claim')
+    }
+  }
+
+  #resolveProviderId(providerId) {
+    const resolvedProviderId = providerId ?? this.#getPrimaryProviderId?.()
 
     if (!resolvedProviderId) {
       throw new Error('Authentication provider id is required')
@@ -41,9 +75,9 @@ export function createOidcClient({
     return resolvedProviderId
   }
 
-  function resolveProviderConfig(providerId) {
-    const resolvedProviderId = resolveProviderId(providerId)
-    const providerConfig = getProviderConfig(resolvedProviderId)
+  #resolveProviderConfig(providerId) {
+    const resolvedProviderId = this.#resolveProviderId(providerId)
+    const providerConfig = this.#getProviderConfig(resolvedProviderId)
 
     if (!providerConfig?.discoveryUrl) {
       throw new Error(
@@ -57,32 +91,35 @@ export function createOidcClient({
     }
   }
 
-  function getRedirectUri(providerId) {
-    const providerConfig = resolveProviderConfig(providerId)
+  #getRedirectUri(providerId) {
+    const providerConfig = this.#resolveProviderConfig(providerId)
 
-    return new URL(providerConfig.redirectPath, getHubOrigin()).toString()
+    return new URL(
+      providerConfig.redirectPath,
+      this.#getHubOrigin()
+    ).toString()
   }
 
-  async function getOidcMetadata(providerId) {
-    const providerConfig = resolveProviderConfig(providerId)
+  async getOidcMetadata(providerId) {
+    const providerConfig = this.#resolveProviderConfig(providerId)
 
-    if (!providerMetadata.has(providerConfig.providerId)) {
-      providerMetadata.set(
+    if (!this.#providerMetadata.has(providerConfig.providerId)) {
+      this.#providerMetadata.set(
         providerConfig.providerId,
-        fetchJson(providerConfig.discoveryUrl)
+        this.#fetchJson(providerConfig.discoveryUrl)
       )
     }
 
-    return providerMetadata.get(providerConfig.providerId)
+    return this.#providerMetadata.get(providerConfig.providerId)
   }
 
-  async function exchangeCodeForTokens(providerId, code) {
-    const providerConfig = resolveProviderConfig(providerId)
-    const metadata = await getOidcMetadata(providerConfig.providerId)
+  async #exchangeCodeForTokens(providerId, code) {
+    const providerConfig = this.#resolveProviderConfig(providerId)
+    const metadata = await this.getOidcMetadata(providerConfig.providerId)
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
-      redirect_uri: getRedirectUri(providerConfig.providerId),
+      redirect_uri: this.#getRedirectUri(providerConfig.providerId),
       client_id: providerConfig.clientId,
       client_secret: providerConfig.clientSecret
     })
@@ -91,7 +128,7 @@ export function createOidcClient({
       body.set('serviceId', providerConfig.serviceId)
     }
 
-    return fetchJson(metadata.token_endpoint, {
+    return this.#fetchJson(metadata.token_endpoint, {
       method: 'POST',
       headers: {
         'content-type': 'application/x-www-form-urlencoded'
@@ -100,9 +137,9 @@ export function createOidcClient({
     })
   }
 
-  async function buildAuthorizationUrl(request, providerId) {
-    const providerConfig = resolveProviderConfig(providerId)
-    const metadata = await getOidcMetadata(providerConfig.providerId)
+  async buildAuthorizationUrl(request, providerId) {
+    const providerConfig = this.#resolveProviderConfig(providerId)
+    const metadata = await this.getOidcMetadata(providerConfig.providerId)
     const returnUrl = getReturnUrlFromRequest(request)
     const authFlow = {
       ...createHubAuthFlow({ returnUrl }),
@@ -117,7 +154,7 @@ export function createOidcClient({
     authorizationUrl.searchParams.set('scope', 'openid')
     authorizationUrl.searchParams.set(
       'redirect_uri',
-      getRedirectUri(providerConfig.providerId)
+      this.#getRedirectUri(providerConfig.providerId)
     )
     authorizationUrl.searchParams.set('state', authFlow.state)
     authorizationUrl.searchParams.set('nonce', authFlow.nonce)
@@ -129,35 +166,13 @@ export function createOidcClient({
     return authorizationUrl.toString()
   }
 
-  async function completeAuthorizationCodeGrant(request) {
-    const authFlow = getHubAuthFlow(request)
-    const providerId = authFlow?.providerId ?? getPrimaryProviderId?.()
-
-    if (!authFlow?.state || !authFlow?.nonce || !providerId) {
-      throw new Error('Authentication flow session was not found')
-    }
-
-    if (request.query?.state !== authFlow.state) {
-      throw new Error('State mismatch')
-    }
-
-    if (!request.query?.code) {
-      throw new Error('Authorization code was not returned')
-    }
-
-    const providerConfig = resolveProviderConfig(providerId)
-    const metadata = await getOidcMetadata(providerConfig.providerId)
-    const tokens = await exchangeCodeForTokens(
-      providerConfig.providerId,
-      request.query.code
-    )
-
+  async #verifyIdToken(tokens, metadata, providerConfig) {
     if (!tokens.id_token) {
       throw new Error('Token response did not include an ID token')
     }
 
-    if (!providerJwks.has(providerConfig.providerId)) {
-      providerJwks.set(
+    if (!this.#providerJwks.has(providerConfig.providerId)) {
+      this.#providerJwks.set(
         providerConfig.providerId,
         createRemoteJWKSet(new URL(metadata.jwks_uri))
       )
@@ -165,26 +180,33 @@ export function createOidcClient({
 
     const { payload } = await jwtVerify(
       tokens.id_token,
-      providerJwks.get(providerConfig.providerId),
+      this.#providerJwks.get(providerConfig.providerId),
       {
         issuer: metadata.issuer,
         audience: providerConfig.clientId
       }
     )
 
-    if (payload.nonce !== authFlow.nonce) {
-      throw new Error('Nonce mismatch')
-    }
+    return payload
+  }
 
-    if (
-      providerConfig.serviceId &&
-      payload.serviceId &&
-      payload.serviceId !== providerConfig.serviceId
-    ) {
-      throw new Error('Unexpected serviceId claim')
-    }
+  async completeAuthorizationCodeGrant(request) {
+    const authFlow = getHubAuthFlow(request)
+    const providerId = authFlow?.providerId ?? this.#getPrimaryProviderId?.()
 
-    const user = mapUser(payload, {
+    this.#validateAuthorizationFlow(authFlow, providerId, request)
+
+    const providerConfig = this.#resolveProviderConfig(providerId)
+    const metadata = await this.getOidcMetadata(providerConfig.providerId)
+    const tokens = await this.#exchangeCodeForTokens(
+      providerConfig.providerId,
+      request.query.code
+    )
+    const payload = await this.#verifyIdToken(tokens, metadata, providerConfig)
+
+    this.#validateIdTokenClaims(payload, authFlow, providerConfig)
+
+    const user = this.#mapUser(payload, {
       providerId: providerConfig.providerId,
       providerConfig
     })
@@ -205,13 +227,14 @@ export function createOidcClient({
     }
   }
 
-  async function buildLogoutUrl(request) {
+  async buildLogoutUrl(request) {
     const authSession = getHubAuthSession(request)
-    const providerId = authSession?.authProvider ?? getPrimaryProviderId?.()
-    const metadata = await getOidcMetadata(providerId)
+    const providerId =
+      authSession?.authProvider ?? this.#getPrimaryProviderId?.()
+    const metadata = await this.getOidcMetadata(providerId)
     const logoutUrl = new URL(metadata.end_session_endpoint)
 
-    logoutUrl.searchParams.set('post_logout_redirect_uri', getHubOrigin())
+    logoutUrl.searchParams.set('post_logout_redirect_uri', this.#getHubOrigin())
 
     if (authSession?.idToken) {
       logoutUrl.searchParams.set('id_token_hint', authSession.idToken)
@@ -219,11 +242,12 @@ export function createOidcClient({
 
     return logoutUrl.toString()
   }
+}
 
-  return {
-    buildAuthorizationUrl,
-    buildLogoutUrl,
-    completeAuthorizationCodeGrant,
-    getOidcMetadata
-  }
+/**
+ * @param {{ getProviderConfig: Function, getHubOrigin: Function, getPrimaryProviderId?: Function, mapUser: Function }} options
+ * @returns {OidcClient}
+ */
+export function createOidcClient(options) {
+  return new OidcClient(options)
 }
