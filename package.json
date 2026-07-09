@@ -1,5 +1,5 @@
 {
-  "name": "@livestock/hub-core",
+  "name": "@livestock/hubs-infra-core",
   "version": "0.1.0",
   "description": "Shared hub mechanics for the livestock platform.",
   "type": "module",
