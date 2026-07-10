@@ -9,6 +9,8 @@ import {
   issueHubJwt
 } from '@livestock/ui-services/auth'
 
+const SERVICE_UNAVAILABLE = 503
+
 function createLoginController({
   getCookieOptions,
   getHubJwtConfig,
@@ -48,7 +50,7 @@ function createLoginController({
           .response(
             'Authentication is not available. Check the hub OIDC configuration.'
           )
-          .code(503)
+          .code(SERVICE_UNAVAILABLE)
       }
 
       return h.redirect(authorizationUrl)
@@ -111,6 +113,10 @@ function createLogoutController({
   }
 }
 
+/**
+ * @param {{ ttlSeconds: number, isSecure: boolean }} options
+ * @returns {object}
+ */
 export function createHubCookieOptions({ ttlSeconds, isSecure }) {
   return getHubJwtCookieOptions({
     ttlSeconds,
@@ -118,6 +124,10 @@ export function createHubCookieOptions({ ttlSeconds, isSecure }) {
   })
 }
 
+/**
+ * @param {{ pluginName?: string, getHubJwtCookieName: Function, getCookieOptions: Function, getHubJwtConfig: Function, fetchUserProfile: Function, buildAuthorizationUrl: Function, completeAuthorizationCodeGrant: Function, buildLogoutUrl: Function, loginRoutes: object[] }} options
+ * @returns {object}
+ */
 export function createHubAuthPlugin({
   pluginName = 'auth',
   getHubJwtCookieName,

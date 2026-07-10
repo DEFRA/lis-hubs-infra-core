@@ -10,6 +10,7 @@ coverage
 .envrc
 tsconfig.tsbuildinfo
 .env
+.npmrc
 
 # TODO: remove once @livestock deps are published to a proper registry.
 # Ignored for now because the lockfile resolves @livestock from the local

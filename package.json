@@ -16,5 +16,12 @@
   "dependencies": {
     "@livestock/ui-services": "^0.1.0",
     "jose": "6.2.3"
+  },
+  "devDependencies": {
+    "@defra/lis-infra-eslint-config": "0.0.1",
+    "eslint": "^9.0.0"
+  },
+  "scripts": {
+    "lint": "eslint ."
   }
 }
