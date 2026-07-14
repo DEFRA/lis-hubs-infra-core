@@ -5,17 +5,12 @@
   "type": "module",
   "main": "src/index.js",
   "exports": {
-    ".": "./src/index.js",
-    "./auth/oidc": "./src/auth/oidc.js",
-    "./auth/plugin": "./src/auth/plugin.js",
-    "./auth/session": "./src/auth/session.js"
+    ".": "./src/index.js"
   },
   "engines": {
     "node": ">=24"
   },
   "dependencies": {
-    "@livestock/ui-services": "^0.1.0",
-    "jose": "6.2.3"
   },
   "devDependencies": {
     "@defra/lis-infra-eslint-config": "0.0.1",
