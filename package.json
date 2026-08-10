@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/DEFRA/lis-species-cattle.git"
+    "url": "https://github.com/DEFRA/lis-hubs-infra-core.git"
   },
   "exports": {
     ".": "./src/index.js"
