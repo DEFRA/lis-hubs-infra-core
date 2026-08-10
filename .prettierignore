@@ -1,0 +1,5 @@
+tools/
+.cake/
+artifacts/
+coverage/
+node_modules/

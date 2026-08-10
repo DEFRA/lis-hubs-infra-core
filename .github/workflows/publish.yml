@@ -1,0 +1,95 @@
+#file: noinspection UndefinedParamsPresent,UndefinedAction
+name: 'Publish npm Package'
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-release:
+    name: 'Validate Tagged Commit'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      dist-tag: ${{ steps.validate.outputs.dist-tag }}
+
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch branch references
+        run: git fetch --force origin '+refs/heads/*:refs/remotes/origin/*'
+
+      - name: Validate tag and source branch
+        id: validate
+        env:
+          PACKAGE_VERSION: ${{ github.ref_name }}
+          TAGGED_COMMIT: ${{ github.sha }}
+        run: |
+          stable='^[0-9]+\.[0-9]+\.[0-9]+$'
+          prerelease='^[0-9]+\.[0-9]+\.[0-9]+-lreg-[0-9]+\.alpha\.[1-9][0-9]*$'
+
+          if [[ "$PACKAGE_VERSION" =~ $stable ]]; then
+            if ! git merge-base --is-ancestor "$TAGGED_COMMIT" origin/main; then
+              echo "Stable tag '$PACKAGE_VERSION' is not on main." >&2
+              exit 1
+            fi
+            dist_tag='latest'
+          elif [[ "$PACKAGE_VERSION" =~ $prerelease ]]; then
+            containing_branches=$(git branch --remotes --contains "$TAGGED_COMMIT")
+            if ! grep -Eq 'origin/(feature|hotfix)/' <<< "$containing_branches"; then
+              echo "Prerelease tag '$PACKAGE_VERSION' is not on a feature or hotfix branch." >&2
+              exit 1
+            fi
+            dist_tag='alpha'
+          else
+            echo "Tag '$PACKAGE_VERSION' is not a supported package version." >&2
+            exit 1
+          fi
+
+          echo "version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "dist-tag=$dist_tag" >> "$GITHUB_OUTPUT"
+
+  build-pack:
+    name: 'Pack Tagged Source'
+    needs: validate-release
+    uses: ./.github/workflows/support-build-pack.yml
+    with:
+      version: ${{ needs.validate-release.outputs.version }}
+      ref: ${{ needs.validate-release.outputs.version }}
+
+  publish-npm:
+    name: 'Publish to npmjs'
+    needs: [validate-release, build-pack]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Download npm package
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-packages
+          path: artifacts
+
+      - name: Publish using npm trusted publishing
+        run: npm publish ./artifacts/*.tgz --tag "${{ needs.validate-release.outputs.dist-tag }}"
