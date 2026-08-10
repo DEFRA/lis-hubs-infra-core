@@ -1,6 +1,6 @@
 # Hub Core
 
-Shared package for hub mechanics.
+Shared package for hub mechanics
 
 Responsibilities:
 
