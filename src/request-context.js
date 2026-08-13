@@ -1,4 +1,4 @@
-import {AsyncLocalStorage} from 'node:async_hooks'
+import { AsyncLocalStorage } from 'node:async_hooks'
 
 const storage = new AsyncLocalStorage()
 
@@ -11,8 +11,7 @@ export const plugin = {
 
       store.set(
         'correlation_id',
-          request.headers['x-cdp-request-id'] ||
-          crypto.randomUUID()
+        request.headers['x-cdp-request-id'] || crypto.randomUUID()
       )
 
       for (const cycle of ['_lifecycle', '_postCycle']) {
