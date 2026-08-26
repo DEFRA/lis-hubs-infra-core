@@ -31,11 +31,13 @@
   "author": "Defra DDTS",
   "license": "OGL-UK-3.0",
   "dependencies": {
+    "@defra/lis-hubs-infra-registry": "^0.3.0",
+    "@hapi/h2o2": "10.0.4",
+    "convict": "6.2.5",
+    "convict-format-with-validator": "6.2.0",
     "eslint-plugin-jsdoc": "^63.0.8",
     "eslint-plugin-sonarjs": "^4.1.0",
-    "neostandard": "0.13.0",
-    "convict": "6.2.5",
-    "convict-format-with-validator": "6.2.0"
+    "neostandard": "0.13.0"
   },
   "peerDependencies": {
     "eslint": "^9.0.0"
