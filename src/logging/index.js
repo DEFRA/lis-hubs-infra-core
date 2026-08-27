@@ -10,7 +10,7 @@ const defaultIgnorePath = (_, request) =>
   request.path === '/health' ||
   request.path === '/favicon.ico'
 
-const validFormats = ['ecs', 'pretty-print']
+const validFormats = new Set(['ecs', 'pretty-print'])
 
 // Standardised, non-configurable across every consumer - these headers
 // must never reach logs.
@@ -81,7 +81,7 @@ class Logger {
   }
 
   set format(str) {
-    if (validFormats.includes(str)) {
+    if (validFormats.has(str)) {
       this.#format = str
       this.#prettyStream.enabled = str === 'pretty-print'
     }
