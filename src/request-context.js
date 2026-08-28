@@ -25,6 +25,12 @@ function onRequest(request, h) {
   const correlationId =
     request.headers['x-cdp-request-id'] || crypto.randomUUID()
   initialStore.set(`correlation_id`, correlationId)
+  // A single Map, shared by reference across both cycles below - not a
+  // fresh Map per cycle, or anything set into logger.context during
+  // _lifecycle (e.g. hydrateAuthorization's user_email_hash, set from
+  // onPreAuth) would be invisible to _reply, which is where hapi-pino's
+  // response log line actually fires.
+  const logContextStore = new Map(initialStore)
 
   // _lifecycle covers routing through the handler; _reply covers
   // everything after (including _postCycle, _abort and _finalize,
@@ -36,7 +42,7 @@ function onRequest(request, h) {
   // reached that log line - context does not survive back across an
   // awaited storage.run() call into an unwrapped caller.
   for (const cycle of ['_lifecycle', '_reply']) {
-    wrapLifecycleHook(request, cycle, initialStore)
+    wrapLifecycleHook(request, cycle, initialStore, logContextStore)
   }
   return h.continue
 }
@@ -49,15 +55,14 @@ function onRequest(request, h) {
  * @param {object} request
  * @param {string} cycle - '_lifecycle' or '_reply'
  * @param {Map} initialStore
+ * @param {Map} logContextStore
  * @returns {void}
  */
-function wrapLifecycleHook(request, cycle, initialStore) {
+function wrapLifecycleHook(request, cycle, initialStore, logContextStore) {
   const original = request[cycle].bind(request)
   request[cycle] = (...args) =>
     contextStore.run(initialStore, () =>
-      logger.context.run(new Map(initialStore.entries()), () =>
-        original(...args)
-      )
+      logger.context.run(logContextStore, () => original(...args))
     )
 }
 
