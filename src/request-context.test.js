@@ -10,6 +10,7 @@ import {
   plugin,
   set
 } from './request-context.js'
+import { logger } from './logging/index.js'
 
 const mocks = {
   run: vi.spyOn(AsyncLocalStorage.prototype, 'run'),
@@ -75,10 +76,41 @@ describe('requestContext', () => {
       request._reply()
       expect(mocks.run).toHaveBeenCalledTimes(4)
       const [firstStore] = mocks.run.mock.calls[0]
+      const [secondStore] = mocks.run.mock.calls[1]
       const [thirdStore] = mocks.run.mock.calls[2]
+      const [fourthStore] = mocks.run.mock.calls[3]
       expect(firstStore).toBe(thirdStore)
       expect(firstStore).toBeInstanceOf(Map)
+      expect(secondStore).toBe(fourthStore)
+      expect(secondStore).toBeInstanceOf(Map)
       expect(result).toBe(h.continue)
+    })
+
+    test('a value set on logger.context during _lifecycle is still visible during _reply', () => {
+      // Arrange
+      const ext = vi.fn()
+      const server = { ext }
+      plugin.register(server)
+      const [[, handler]] = ext.mock.calls
+      const h = { continue: Symbol('continue') }
+      let valueSeenDuringReply
+      const request = {
+        headers: {},
+        _lifecycle: vi.fn(() => {
+          logger.context.set('user_email_hash', 'hashed-value')
+        }),
+        _reply: vi.fn(() => {
+          valueSeenDuringReply = logger.context.get('user_email_hash')
+        })
+      }
+
+      // Act
+      handler(request, h)
+      request._lifecycle()
+      request._reply()
+
+      // Assert
+      expect(valueSeenDuringReply).toBe('hashed-value')
     })
 
     test('onRequest forwards arguments through _reply to the original method', () => {
