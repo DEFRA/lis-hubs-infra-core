@@ -154,7 +154,7 @@ class Logger {
     }
 
     const tenantMessage = Object.entries(contextValues)
-      .toSorted(([a], [b]) => a - b)
+      .toSorted(([a], [b]) => a.localeCompare(b))
       .filter(([, value]) => value)
       .map(([key, value]) => `${key}=${value}`)
       .join(' ')
