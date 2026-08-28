@@ -205,6 +205,27 @@ describe('requestContext', () => {
       // Assert
       expect(store.get('correlation_id')).toBe('cdp-1')
     })
+
+    test('onRequest defaults origin_service from the originService option when nothing else sets it', () => {
+      // Arrange
+      // Act
+      const store = getStoreFromRequest({}, { originService: 'front-office' })
+
+      // Assert
+      expect(store.get('origin_service')).toBe('front-office')
+    })
+
+    test('onRequest does not override origin_service from a trusted header with the originService option', () => {
+      // Arrange
+      // Act
+      const store = getStoreFromRequest(
+        { 'x-lis-origin-service': 'back-office' },
+        { trustLisHeaders: true, originService: 'front-office' }
+      )
+
+      // Assert
+      expect(store.get('origin_service')).toBe('back-office')
+    })
   })
 
   describe('get()', () => {

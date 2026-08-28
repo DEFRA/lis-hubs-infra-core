@@ -42,7 +42,7 @@ export const plugin = {
   name: 'requestContext',
   version: '1.0.0',
   register(server, options = {}) {
-    const { trustLisHeaders = false } = options
+    const { trustLisHeaders = false, originService } = options
 
     server.ext('onRequest', (request, h) => {
       const store = new Map()
@@ -50,6 +50,10 @@ export const plugin = {
 
       if (!context.correlation_id) {
         context.correlation_id = crypto.randomUUID()
+      }
+
+      if (!context.origin_service && originService) {
+        context.origin_service = originService
       }
 
       for (const [key, value] of Object.entries(context)) {
