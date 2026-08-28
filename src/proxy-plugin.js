@@ -1,37 +1,6 @@
 import h2o2 from '@hapi/h2o2'
 
 import { getModulesForHub } from '@defra/lis-hubs-infra-registry'
-import * as requestContext from './request-context.js'
-
-const lisContextHeaderNames = [
-  'x-lis-origin-service',
-  'x-lis-cph-number',
-  'x-lis-animal-id',
-  'x-lis-user-id'
-]
-
-/**
- * h2o2's passThrough clones the client's original request headers before
- * merging this object on top (Hoek.merge, which skips null/undefined to
- * preserve empty strings) - so every x-lis-* header must be set explicitly,
- * blanking any without a trusted value, or an attacker-supplied header on
- * the original request would pass through to the spoke untouched.
- * @param {string} hubId
- * @returns {object}
- */
-function buildLisContextHeaders(hubId) {
-  const headers = Object.fromEntries(
-    lisContextHeaderNames.map((header) => [header, ''])
-  )
-
-  Object.assign(headers, requestContext.getHeaders())
-
-  if (!headers['x-lis-origin-service']) {
-    headers['x-lis-origin-service'] = hubId
-  }
-
-  return headers
-}
 
 /**
  * @param {{ hubId: string, environment: string }} options
@@ -94,8 +63,7 @@ export function createProxyPlugin({ hubId, environment }) {
                       'x-forwarded-prefix': path,
                       ...(request.headers.cookie && {
                         cookie: request.headers.cookie
-                      }),
-                      ...buildLisContextHeaders(hubId)
+                      })
                     }
                   }
                 }
