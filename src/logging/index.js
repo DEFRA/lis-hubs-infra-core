@@ -3,7 +3,7 @@ import hapiPino from 'hapi-pino'
 import { TogglablePrettyStream } from './togglable-pretty-stream.js'
 import { pino } from 'pino'
 import { ecsFormat } from '@elastic/ecs-pino-format'
-import { mixin } from './mixin.js'
+import { LogContextStore } from './log-context-store.js'
 
 const defaultIgnorePath = (_, request) =>
   request.path.startsWith('/public') ||
@@ -22,7 +22,8 @@ const redactPaths = [
 
 class Logger {
   #logger
-  #prettyStream
+  #prettyStream = new TogglablePrettyStream({ sync: true })
+  #contextStore
   #level = 'info'
   #enabled = true
   #format = 'ecs'
@@ -30,20 +31,17 @@ class Logger {
   #serviceVersion = process.env.SERVICE_VERSION
 
   constructor() {
-    this.#prettyStream = new TogglablePrettyStream({ sync: true })
     this.#logger = pino(
       {
         ...ecsFormat(),
         redact: { paths: redactPaths, remove: true },
         level: 'info',
         nesting: true,
-        mixin: () => ({
-          ...mixin(),
-          service: { name: this.#serviceName, version: this.#serviceVersion }
-        })
+        mixin: this.#mixin.bind(this)
       },
       this.#prettyStream
     )
+    this.#contextStore = new LogContextStore({ logger: this })
   }
 
   set serviceName(name) {
@@ -115,6 +113,17 @@ class Logger {
     return this.#logger.trace.bind(this.#logger)
   }
 
+  /**
+   * Request-scoped store for values that should enrich log lines - set via
+   * context.set(key, value) (or context.set(key, value, true) to hash the
+   * value with context.hashSecret) wherever they become known.
+   *
+   * @returns {LogContextStore}
+   */
+  get context() {
+    return this.#contextStore
+  }
+
   get hapiPlugin() {
     return {
       plugin: hapiPino,
@@ -123,6 +132,38 @@ class Logger {
         ignoreFunc: defaultIgnorePath
       }
     }
+  }
+
+  /**
+   * pino mixin() - merges every value set on context (excluding
+   * correlation_id, which maps onto ECS's trace.id) into every log line, as
+   * space-separated key=value pairs on ECS's tenant.message field.
+   * @returns {object}
+   */
+  #mixin() {
+    const mixinValues = {
+      service: { name: this.#serviceName, version: this.#serviceVersion }
+    }
+    const correlationId = this.context.get('correlation_id')
+    const contextValues = this.context.getAll()
+
+    delete contextValues['correlation_id']
+
+    if (correlationId) {
+      mixinValues.trace = { id: correlationId }
+    }
+
+    const tenantMessage = Object.entries(contextValues)
+      .toSorted(([a], [b]) => a.localeCompare(b))
+      .filter(([, value]) => value)
+      .map(([key, value]) => `${key}=${value}`)
+      .join(' ')
+
+    if (tenantMessage) {
+      mixinValues.tenant = { message: tenantMessage }
+    }
+
+    return mixinValues
   }
 }
 

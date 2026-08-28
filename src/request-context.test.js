@@ -6,6 +6,7 @@ import {
   clearAll,
   get,
   getHeaders,
+  has,
   plugin,
   set
 } from './request-context.js'
@@ -72,10 +73,10 @@ describe('requestContext', () => {
       expect(request._reply).not.toBe(reply)
       request._lifecycle()
       request._reply()
-      expect(mocks.run).toHaveBeenCalledTimes(2)
+      expect(mocks.run).toHaveBeenCalledTimes(4)
       const [firstStore] = mocks.run.mock.calls[0]
-      const [secondStore] = mocks.run.mock.calls[1]
-      expect(firstStore).toBe(secondStore)
+      const [thirdStore] = mocks.run.mock.calls[2]
+      expect(firstStore).toBe(thirdStore)
       expect(firstStore).toBeInstanceOf(Map)
       expect(result).toBe(h.continue)
     })
@@ -117,93 +118,40 @@ describe('requestContext', () => {
       expect(typeof store.get('correlation_id')).toBe('string')
       expect(store.get('correlation_id').length).toBeGreaterThan(0)
     })
+  })
 
-    test('onRequest stores origin_service, cph, animal_id and user_id from their x-lis-* headers when trustLisHeaders is true', () => {
+  describe('has()', () => {
+    test('it returns false when there is no store', () => {
       // Arrange
+      mocks.getStore.mockReturnValue(undefined)
+
       // Act
-      const store = getStoreFromRequest(
-        {
-          'x-lis-origin-service': 'front-office',
-          'x-lis-cph-number': '12/345/6789',
-          'x-lis-animal-id': 'UK123456789012',
-          'x-lis-user-id': 'hashed-user-1'
-        },
-        { trustLisHeaders: true }
-      )
+      const result = has('foo')
 
       // Assert
-      expect(store.get('origin_service')).toBe('front-office')
-      expect(store.get('cph')).toBe('12/345/6789')
-      expect(store.get('animal_id')).toBe('UK123456789012')
-      expect(store.get('user_id')).toBe('hashed-user-1')
+      expect(result).toBe(false)
     })
 
-    test('onRequest does not set origin_service, cph, animal_id or user_id when their headers are missing', () => {
+    test('it returns false when the key is not in the store', () => {
       // Arrange
+      mocks.getStore.mockReturnValue(new Map())
+
       // Act
-      const store = getStoreFromRequest({}, { trustLisHeaders: true })
+      const result = has('foo')
 
       // Assert
-      expect(store.has('origin_service')).toBe(false)
-      expect(store.has('cph')).toBe(false)
-      expect(store.has('animal_id')).toBe(false)
-      expect(store.has('user_id')).toBe(false)
+      expect(result).toBe(false)
     })
 
-    test('onRequest only stores the x-lis-* headers that are present when trustLisHeaders is true', () => {
+    test('it returns true when the key is in the store', () => {
       // Arrange
+      mocks.getStore.mockReturnValue(new Map([['foo', 'bar']]))
+
       // Act
-      const store = getStoreFromRequest(
-        { 'x-lis-cph-number': '12/345/6789' },
-        { trustLisHeaders: true }
-      )
+      const result = has('foo')
 
       // Assert
-      expect(store.get('cph')).toBe('12/345/6789')
-      expect(store.has('origin_service')).toBe(false)
-      expect(store.has('animal_id')).toBe(false)
-      expect(store.has('user_id')).toBe(false)
-    })
-
-    test('onRequest ignores x-lis-* headers by default, even when present, so a client cannot inject them at a hub', () => {
-      // Arrange
-      // Act
-      const store = getStoreFromRequest({
-        'x-lis-origin-service': 'front-office',
-        'x-lis-cph-number': '12/345/6789',
-        'x-lis-animal-id': 'UK123456789012',
-        'x-lis-user-id': 'hashed-user-1'
-      })
-
-      // Assert
-      expect(store.has('origin_service')).toBe(false)
-      expect(store.has('cph')).toBe(false)
-      expect(store.has('animal_id')).toBe(false)
-      expect(store.has('user_id')).toBe(false)
-    })
-
-    test('onRequest ignores x-lis-* headers when trustLisHeaders is explicitly false', () => {
-      // Arrange
-      // Act
-      const store = getStoreFromRequest(
-        { 'x-lis-cph-number': '12/345/6789' },
-        { trustLisHeaders: false }
-      )
-
-      // Assert
-      expect(store.has('cph')).toBe(false)
-    })
-
-    test('onRequest still stores correlation_id when trustLisHeaders is false', () => {
-      // Arrange
-      // Act
-      const store = getStoreFromRequest(
-        { 'x-cdp-request-id': 'cdp-1' },
-        { trustLisHeaders: false }
-      )
-
-      // Assert
-      expect(store.get('correlation_id')).toBe('cdp-1')
+      expect(result).toBe(true)
     })
   })
 
@@ -257,7 +205,7 @@ describe('requestContext', () => {
 
       // Assert
       expect(error).toBeInstanceOf(Error)
-      expect(error?.message).toBe('No request context available')
+      expect(error?.message).toBe('No store available')
     })
 
     test('it sets the value on the store', () => {
@@ -288,7 +236,7 @@ describe('requestContext', () => {
 
       // Assert
       expect(error).toBeInstanceOf(Error)
-      expect(error?.message).toBe('No request context available')
+      expect(error?.message).toBe('No store available')
     })
 
     test('it removes the key from the store', () => {
@@ -319,7 +267,7 @@ describe('requestContext', () => {
 
       // Assert
       expect(error).toBeInstanceOf(Error)
-      expect(error?.message).toBe('No request context available')
+      expect(error?.message).toBe('No store available')
     })
 
     test('it removes all keys from the store', () => {
@@ -339,42 +287,31 @@ describe('requestContext', () => {
   })
 
   describe('getHeaders()', () => {
-    test('it returns the x-lis-* headers for whichever context values are set', () => {
+    test('it returns the x-cdp-request-id header when correlation_id is set', () => {
       // Arrange
-      const store = new Map([
-        ['origin_service', 'front-office'],
-        ['cph', '12/345/6789'],
-        ['animal_id', 'UK123456789012'],
-        ['user_id', 'hashed-user-1']
-      ])
-      mocks.getStore.mockReturnValue(store)
+      mocks.getStore.mockReturnValue(new Map([['correlation_id', 'cdp-1']]))
 
       // Act
       const result = getHeaders()
 
       // Assert
-      expect(result).toEqual({
-        'x-lis-origin-service': 'front-office',
-        'x-lis-cph-number': '12/345/6789',
-        'x-lis-animal-id': 'UK123456789012',
-        'x-lis-user-id': 'hashed-user-1'
-      })
+      expect(result).toEqual({ 'x-cdp-request-id': 'cdp-1' })
     })
 
-    test('it omits headers for context values that are not set', () => {
-      // Arrange
-      mocks.getStore.mockReturnValue(new Map([['cph', '12/345/6789']]))
-
-      // Act
-      const result = getHeaders()
-
-      // Assert
-      expect(result).toEqual({ 'x-lis-cph-number': '12/345/6789' })
-    })
-
-    test('it returns an empty object when no context values are set', () => {
+    test('it returns an empty object when correlation_id is not set', () => {
       // Arrange
       mocks.getStore.mockReturnValue(new Map())
+
+      // Act
+      const result = getHeaders()
+
+      // Assert
+      expect(result).toEqual({})
+    })
+
+    test('it returns an empty object when there is no store', () => {
+      // Arrange
+      mocks.getStore.mockReturnValue(undefined)
 
       // Act
       const result = getHeaders()

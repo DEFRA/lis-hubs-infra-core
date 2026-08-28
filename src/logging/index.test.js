@@ -229,4 +229,71 @@ describe('Logger', () => {
       expect(freshLogging.format).toBe('ecs')
     })
   })
+
+  describe('context', () => {
+    test('it maps correlation_id onto trace.id on every log line', () => {
+      // Arrange
+      const freshLogging = new logger.constructor()
+      const writeSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation(() => true)
+
+      // Act
+      freshLogging.context.run(
+        new Map([['correlation_id', 'correlation-1']]),
+        () => freshLogging.info('test message')
+      )
+      const [logLine] = writeSpy.mock.calls[0]
+      writeSpy.mockRestore()
+
+      // Assert
+      expect(JSON.parse(logLine.toString()).trace).toEqual({
+        id: 'correlation-1'
+      })
+    })
+
+    test('it merges every other context value onto tenant.message, sorted alphabetically by key', () => {
+      // Arrange
+      const freshLogging = new logger.constructor()
+      const writeSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation(() => true)
+
+      // Act
+      freshLogging.context.run(
+        new Map([
+          ['user_email_hash', 'hash-1'],
+          ['cph', '12/345/6789'],
+          ['animal_id', 'UK123456789012']
+        ]),
+        () => freshLogging.info('test message')
+      )
+      const [logLine] = writeSpy.mock.calls[0]
+      writeSpy.mockRestore()
+
+      // Assert
+      expect(JSON.parse(logLine.toString()).tenant).toEqual({
+        message:
+          'animal_id=UK123456789012 cph=12/345/6789 user_email_hash=hash-1'
+      })
+    })
+
+    test('it omits trace and tenant when no context is active', () => {
+      // Arrange
+      const freshLogging = new logger.constructor()
+      const writeSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation(() => true)
+
+      // Act
+      freshLogging.info('test message')
+      const [logLine] = writeSpy.mock.calls[0]
+      writeSpy.mockRestore()
+
+      // Assert
+      const parsed = JSON.parse(logLine.toString())
+      expect(parsed.trace).toBeUndefined()
+      expect(parsed.tenant).toBeUndefined()
+    })
+  })
 })
