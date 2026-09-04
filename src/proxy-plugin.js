@@ -31,6 +31,7 @@ export function createProxyPlugin({ hubId, environment }) {
               break
             case 'dev':
             case 'test':
+            case 'ext-test':
             case 'perf-test':
             case 'prod':
               host = `lis-apps-${moduleName}.${environment}.cdp-int.defra.cloud`
