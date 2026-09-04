@@ -75,7 +75,7 @@ describe('createProxyPlugin()', () => {
 
     // Assert
     expect(error).toBeDefined()
-    expect(error.message).toBe('Unhandled environment: unknown')
+    expect(error.message).toBe('Unsupported environment: unknown')
   })
 
   test('sorts modules with the longest path first so a shorter prefix does not swallow a longer one', async () => {
