@@ -18,33 +18,20 @@ export function createProxyPlugin({ hubId, environment }) {
         await server.register(h2o2)
 
         for (const { id: moduleName, path, port } of modules) {
-          let host, protocol
+          let baseUri = ''
 
-          switch (environment) {
-            case 'local':
-              host = 'localhost'
-              protocol = 'http'
-              break
-            case 'docker_compose':
-              host = moduleName
-              protocol = 'http'
-              break
-            case 'dev':
-            case 'test':
-            case 'ext-test':
-            case 'perf-test':
-            case 'prod':
-              host = `lis-apps-${moduleName}.${environment}.cdp-int.defra.cloud`
-              protocol = 'https'
-              break
-            default:
-              throw new Error(`Unhandled environment: ${environment}`)
+          if (isLocal(environment)) {
+            baseUri = `http://localhost:${port}`
+          }
+          if (isCompose(environment)) {
+            baseUri = `http://${moduleName}:${port}`
+          }
+          if (isCdp(environment)) {
+            baseUri = `https://lis-apps-${moduleName}.${environment}.cdp-int.defra.cloud`
           }
 
-          let baseUri = `${protocol}://${host}`
-
-          if (environment === 'local' || environment === 'docker_compose') {
-            baseUri = `${baseUri}:${port}`
+          if (!isSupportedEnv(environment) || baseUri === '') {
+            throw new Error(`Unsupported environment: ${environment}`)
           }
 
           server.route({
@@ -75,4 +62,30 @@ export function createProxyPlugin({ hubId, environment }) {
       }
     }
   }
+}
+
+function isSupportedEnv(env) {
+  const envs = [
+    'local',
+    'docker_compose',
+    'dev',
+    'test',
+    'ext-test',
+    'perf-test',
+    'prod'
+  ]
+  return envs.includes(env)
+}
+
+function isLocal(env) {
+  return env === 'local'
+}
+
+function isCompose(env) {
+  return env === 'docker_compose'
+}
+
+function isCdp(env) {
+  const envs = ['dev', 'test', 'ext-test', 'perf-test', 'prod']
+  return envs.includes(env)
 }
