@@ -49,6 +49,9 @@ export function createProxyPlugin({ hubId, environment }) {
                     uri,
                     headers: {
                       'x-forwarded-prefix': path,
+                      ...(request.headers.authorization && {
+                        authorization: request.headers.authorization
+                      }),
                       ...(request.headers.cookie && {
                         cookie: request.headers.cookie
                       })

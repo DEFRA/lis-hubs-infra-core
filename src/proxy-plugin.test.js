@@ -40,12 +40,16 @@ describe('createProxyPlugin()', () => {
     expect(
       route.handler.proxy.mapUri({
         params: { path: 'summary-data' },
-        headers: { cookie: 'session=abc' }
+        headers: {
+          authorization: 'Bearer hub-service-token',
+          cookie: 'session=abc'
+        }
       })
     ).toEqual({
       uri: `${expectedBaseUri}/summary-data`,
       headers: {
         'x-forwarded-prefix': '/cattle',
+        authorization: 'Bearer hub-service-token',
         cookie: 'session=abc'
       }
     })
