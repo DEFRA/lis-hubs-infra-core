@@ -41,6 +41,7 @@ describe('createProxyPlugin()', () => {
     expect(
       route.handler.proxy.mapUri({
         params: { path: 'summary-data' },
+        url: new URL('http://hub.test/cattle/summary-data'),
         headers: {
           authorization: 'Bearer hub-service-token',
           cookie: 'session=abc'
@@ -54,11 +55,43 @@ describe('createProxyPlugin()', () => {
         cookie: 'session=abc'
       }
     })
-    expect(route.handler.proxy.mapUri({ params: {}, headers: {} })).toEqual({
+    expect(
+      route.handler.proxy.mapUri({
+        params: {},
+        url: new URL('http://hub.test/cattle'),
+        headers: {}
+      })
+    ).toEqual({
       uri: expectedBaseUri,
       headers: {
         'x-forwarded-prefix': '/cattle'
       }
+    })
+  })
+
+  test('forwards the incoming query string to the proxied service', async () => {
+    // Arrange
+    const server = { route: vi.fn(), register: vi.fn() }
+    const proxy = createProxyPlugin({
+      hubId: 'back-office',
+      environment: 'local'
+    })
+
+    // Act
+    await proxy.plugin.register(server)
+
+    // Assert
+    const route = server.route.mock.calls[0][0]
+    expect(
+      route.handler.proxy.mapUri({
+        params: { path: 'animals' },
+        url: new URL(
+          'http://hub.test/cattle/animals?sort=sex&direction=asc&page=1'
+        ),
+        headers: {}
+      })
+    ).toMatchObject({
+      uri: 'http://localhost:3222/animals?sort=sex&direction=asc&page=1'
     })
   })
 
