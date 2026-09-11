@@ -1,6 +1,7 @@
 import h2o2 from '@hapi/h2o2'
 
 import { getModulesForHub } from '@defra/lis-hubs-infra-registry'
+import { getServiceBaseUrl } from './get-service-base-url.js'
 
 /**
  * @param {{ hubId: string, environment: string }} options
@@ -18,21 +19,11 @@ export function createProxyPlugin({ hubId, environment }) {
         await server.register(h2o2)
 
         for (const { id: moduleName, path, port } of modules) {
-          let baseUri = ''
-
-          if (isLocal(environment)) {
-            baseUri = `http://localhost:${port}`
-          }
-          if (isCompose(environment)) {
-            baseUri = `http://${moduleName}:${port}`
-          }
-          if (isCdp(environment)) {
-            baseUri = `https://lis-apps-${moduleName}.${environment}.cdp-int.defra.cloud`
-          }
-
-          if (!isSupportedEnv(environment) || baseUri === '') {
-            throw new Error(`Unsupported environment: ${environment}`)
-          }
+          const baseUri = getServiceBaseUrl(
+            environment,
+            `lis-apps-${moduleName}`,
+            port
+          ).origin
 
           server.route({
             method: '*',
@@ -65,30 +56,4 @@ export function createProxyPlugin({ hubId, environment }) {
       }
     }
   }
-}
-
-function isSupportedEnv(env) {
-  const envs = [
-    'local',
-    'docker_compose',
-    'dev',
-    'test',
-    'ext-test',
-    'perf-test',
-    'prod'
-  ]
-  return envs.includes(env)
-}
-
-function isLocal(env) {
-  return env === 'local'
-}
-
-function isCompose(env) {
-  return env === 'docker_compose'
-}
-
-function isCdp(env) {
-  const envs = ['dev', 'test', 'ext-test', 'perf-test', 'prod']
-  return envs.includes(env)
 }

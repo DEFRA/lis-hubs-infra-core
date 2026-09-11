@@ -20,8 +20,9 @@ describe('createProxyPlugin()', () => {
   test.each([
     // Local proxying intentionally uses HTTP because the services run locally.
     ['local', 'http://localhost:3222'],
-    // eslint-disable-next-line sonarjs/no-clear-text-protocols
-    ['docker_compose', 'http://cattle-home:3222'],
+    // docker_compose reaches every service via the host's published ports -
+    // there's no reliable compose service-name discovery to lean on instead.
+    ['docker_compose', 'http://host.docker.internal:3222'],
     ['test', 'https://lis-apps-cattle-home.test.cdp-int.defra.cloud'],
     ['prod', 'https://lis-apps-cattle-home.prod.cdp-int.defra.cloud']
   ])('registers the %s proxy target', async (environment, expectedBaseUri) => {
