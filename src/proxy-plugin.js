@@ -34,7 +34,9 @@ export function createProxyPlugin({ hubId, environment }) {
                 xforward: true,
                 mapUri(request) {
                   const subPath = request.params.path ?? ''
-                  const uri = subPath ? `${baseUri}/${subPath}` : baseUri
+                  const uri =
+                    (subPath ? `${baseUri}/${subPath}` : baseUri) +
+                    request.url.search
 
                   return {
                     uri,
