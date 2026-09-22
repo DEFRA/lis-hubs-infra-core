@@ -31,7 +31,7 @@
   "author": "Defra DDTS",
   "license": "OGL-UK-3.0",
   "dependencies": {
-    "@defra/lis-hubs-infra-registry": "^0.3.0",
+    "@defra/lis-hubs-infra-registry": "^0.4.0",
     "@elastic/ecs-pino-format": "1.5.0",
     "@hapi/h2o2": "10.0.4",
     "@hapi/wreck": "^18.1.2",
