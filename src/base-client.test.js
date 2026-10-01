@@ -4,14 +4,17 @@ import Wreck from '@hapi/wreck'
 
 import * as requestContext from './request-context.js'
 import { getServiceBaseUrl } from './get-service-base-url.js'
-import { BaseClient } from './base-client.js'
+import { getServiceToken } from './service-token/issuer.js'
+import { BaseClient, ServiceTokenError } from './base-client.js'
 
 vi.mock('./request-context.js')
 vi.mock('./get-service-base-url.js')
+vi.mock('./service-token/issuer.js')
 
 const mocks = {
   requestContextGetHeaders: vi.mocked(requestContext.getHeaders),
-  getServiceBaseUrl: vi.mocked(getServiceBaseUrl)
+  getServiceBaseUrl: vi.mocked(getServiceBaseUrl),
+  getServiceToken: vi.mocked(getServiceToken)
 }
 
 function createClient(options = {}) {
@@ -29,6 +32,7 @@ beforeEach(() => {
     'x-cdp-request-id': 'correlation-1'
   })
   mocks.getServiceBaseUrl.mockReturnValue(new URL('http://localhost:8085'))
+  mocks.getServiceToken.mockResolvedValue('service-token')
 })
 
 afterEach(() => {
@@ -63,14 +67,10 @@ describe('request verbs', () => {
     ['_patch', 'PATCH'],
     ['_delete', 'DELETE']
   ])(
-    'it sends %s requests via Wreck.request with the api key and correlation headers',
+    'it sends %s requests via Wreck.request with the correlation and service token headers',
     async (method, httpMethod) => {
       // Arrange
-      const client = createClient({
-        apiKey: 'test-api-key',
-        apiKeyHeader: 'x-api-key',
-        timeout: 5000
-      })
+      const client = createClient({ timeout: 5000 })
       const res = { statusCode: 200 }
       const request = vi.spyOn(Wreck, 'request').mockResolvedValue(res)
       const read = vi.spyOn(Wreck, 'read').mockResolvedValue({ data: [] })
@@ -89,48 +89,157 @@ describe('request verbs', () => {
       expect(options.headers).toEqual({
         'x-correlation-id': 'correlation-1',
         'x-cdp-request-id': 'correlation-1',
-        'x-api-key': 'test-api-key'
+        authorization: 'Bearer service-token'
       })
       expect(read).toHaveBeenCalledWith(res, options)
       expect(result).toEqual({ res, payload: { data: [] } })
     }
   )
 
-  test('it omits the api key header when no api key is configured', async () => {
-    // Arrange
-    const client = createClient()
-    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
-    vi.spyOn(Wreck, 'read').mockResolvedValue({ data: [] })
-
-    // Act
-    await client._get('api/users/user-1/cphs')
-
-    // Assert
-    expect(Wreck.request.mock.calls[0][2].headers).toEqual({
-      'x-correlation-id': 'correlation-1',
-      'x-cdp-request-id': 'correlation-1'
-    })
-  })
-
   test('it lets per-call headers override the defaults', async () => {
     // Arrange
-    const client = createClient({
-      apiKey: 'test-api-key',
-      apiKeyHeader: 'x-api-key'
-    })
+    const client = createClient()
     vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
     vi.spyOn(Wreck, 'read').mockResolvedValue({})
 
     // Act
     await client._get('api/cattle/UK123', {
-      headers: { 'x-api-key': 'override-key' }
+      headers: { 'x-correlation-id': 'override-id' }
     })
 
     // Assert
-    expect(Wreck.request.mock.calls[0][2].headers['x-api-key']).toBe(
-      'override-key'
+    expect(Wreck.request.mock.calls[0][2].headers['x-correlation-id']).toBe(
+      'override-id'
     )
   })
+})
+
+describe('service token', () => {
+  test('it requests the token for the target service as the audience', async () => {
+    // Arrange
+    const client = createClient()
+    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
+    vi.spyOn(Wreck, 'read').mockResolvedValue({})
+
+    // Act
+    await client._get('api/users/user-1/cphs')
+
+    // Assert
+    expect(mocks.getServiceToken).toHaveBeenCalledWith('lis-be4fe-cattle-home')
+    expect(Wreck.request.mock.calls[0][2].headers.authorization).toBe(
+      'Bearer service-token'
+    )
+  })
+
+  test('it applies correlation, caller then service token headers in that order', async () => {
+    // Arrange
+    mocks.requestContextGetHeaders.mockReturnValue({
+      authorization: 'Bearer correlation',
+      'x-correlation-id': 'correlation'
+    })
+    const client = createClient()
+    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
+    vi.spyOn(Wreck, 'read').mockResolvedValue({})
+
+    // Act
+    await client._get('api/cattle/UK123')
+    await client._get('api/cattle/UK123', {
+      headers: { authorization: 'Bearer caller', 'x-correlation-id': 'caller' }
+    })
+
+    // Assert
+    const [first, second] = Wreck.request.mock.calls.map(
+      ([, , options]) => options.headers
+    )
+    expect(first).toEqual({
+      authorization: 'Bearer service-token',
+      'x-correlation-id': 'correlation'
+    })
+    expect(second).toEqual({
+      authorization: 'Bearer service-token',
+      'x-correlation-id': 'caller'
+    })
+  })
+
+  test('it drops a caller authorization header in any casing', async () => {
+    // Arrange
+    const client = createClient()
+    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
+    vi.spyOn(Wreck, 'read').mockResolvedValue({})
+
+    // Act
+    await client._get('api/cattle/UK123', {
+      headers: { Authorization: 'Bearer caller' }
+    })
+
+    // Assert
+    const { headers } = Wreck.request.mock.calls[0][2]
+    expect(headers.authorization).toBe('Bearer service-token')
+    expect(headers).not.toHaveProperty('Authorization')
+  })
+
+  test('it rejects without calling Wreck when the token cannot be obtained', async () => {
+    // Arrange
+    mocks.getServiceToken.mockRejectedValue(new Error('sts down'))
+    const client = createClient()
+    const request = vi.spyOn(Wreck, 'request')
+
+    // Act
+    let error
+    try {
+      await client._get('api/users/user-1/cphs')
+    } catch (e) {
+      error = e
+    }
+
+    // Assert
+    expect(error).toBeInstanceOf(ServiceTokenError)
+    expect(error.name).toBe('ServiceTokenError')
+    expect(error.statusCode).toBe(503)
+    expect(error.message).toBe(
+      'Failed to get a service token for lis-be4fe-cattle-home'
+    )
+    expect(error.cause.message).toBe('sts down')
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  test('it ignores a caller-supplied baseUrl', async () => {
+    // Arrange
+    const client = createClient()
+    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
+    vi.spyOn(Wreck, 'read').mockResolvedValue({})
+
+    // Act
+    await client._get('api/cattle/UK123', { baseUrl: 'https://evil.example' })
+
+    // Assert
+    expect(Wreck.request.mock.calls[0][2].baseUrl).toBe('http://localhost:8085')
+  })
+
+  test.each([['https://evil.example/steal'], ['//evil.example/steal']])(
+    'it rejects the absolute path %s without fetching a token or calling Wreck',
+    async (path) => {
+      // Arrange
+      mocks.getServiceToken.mockClear()
+      const client = createClient()
+      const request = vi.spyOn(Wreck, 'request')
+
+      // Act
+      let error
+      try {
+        await client._get(path)
+      } catch (e) {
+        error = e
+      }
+
+      // Assert
+      expect(error.message).toBe(
+        'BaseClient paths must be relative to the service base URL'
+      )
+      expect(mocks.getServiceToken).not.toHaveBeenCalled()
+      expect(request).not.toHaveBeenCalled()
+    }
+  )
 })
 
 describe('error handling', () => {

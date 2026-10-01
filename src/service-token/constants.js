@@ -1,0 +1,1 @@
+export const SIGNING_ALGORITHM = 'RS256'
