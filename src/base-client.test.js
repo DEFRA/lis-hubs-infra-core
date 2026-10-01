@@ -96,6 +96,60 @@ describe('request verbs', () => {
     }
   )
 
+  test('it sends the api key in the x-api-key header', async () => {
+    // Arrange
+    const client = createClient({ apiKey: 'test-api-key' })
+    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
+    vi.spyOn(Wreck, 'read').mockResolvedValue({})
+
+    // Act
+    await client._get('api/users/user-1/cphs')
+
+    // Assert
+    expect(Wreck.request.mock.calls[0][2].headers).toEqual({
+      'x-correlation-id': 'correlation-1',
+      'x-cdp-request-id': 'correlation-1',
+      'x-api-key': 'test-api-key',
+      authorization: 'Bearer service-token'
+    })
+  })
+
+  test('it times requests out after 3 seconds by default', async () => {
+    // Arrange
+    const client = createClient()
+    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
+    vi.spyOn(Wreck, 'read').mockResolvedValue({})
+
+    // Act
+    await client._get('api/users/user-1/cphs')
+
+    // Assert
+    expect(Wreck.request.mock.calls[0][2].timeout).toBe(3000)
+  })
+
+  test.each([
+    ['without a configured api key', undefined],
+    ['over a configured api key', 'test-api-key']
+  ])(
+    'it never sends a caller-supplied x-api-key, in any casing, %s',
+    async (_, apiKey) => {
+      // Arrange
+      const client = createClient({ apiKey })
+      vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
+      vi.spyOn(Wreck, 'read').mockResolvedValue({})
+
+      // Act
+      await client._get('api/users/user-1/cphs', {
+        headers: { 'X-Api-Key': 'caller-key', 'x-api-key': 'caller-key' }
+      })
+
+      // Assert
+      const { headers } = Wreck.request.mock.calls[0][2]
+      expect(headers).not.toHaveProperty('X-Api-Key')
+      expect(headers['x-api-key']).toBe(apiKey)
+    }
+  )
+
   test('it lets per-call headers override the defaults', async () => {
     // Arrange
     const client = createClient()
@@ -131,20 +185,25 @@ describe('service token', () => {
     )
   })
 
-  test('it applies correlation, caller then service token headers in that order', async () => {
+  test('it applies correlation, then caller headers, with the api key and service token taking precedence', async () => {
     // Arrange
     mocks.requestContextGetHeaders.mockReturnValue({
       authorization: 'Bearer correlation',
+      'x-api-key': 'correlation',
       'x-correlation-id': 'correlation'
     })
-    const client = createClient()
+    const client = createClient({ apiKey: 'test-api-key' })
     vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
     vi.spyOn(Wreck, 'read').mockResolvedValue({})
 
     // Act
     await client._get('api/cattle/UK123')
     await client._get('api/cattle/UK123', {
-      headers: { authorization: 'Bearer caller', 'x-correlation-id': 'caller' }
+      headers: {
+        authorization: 'Bearer caller',
+        'x-api-key': 'caller',
+        'x-correlation-id': 'caller'
+      }
     })
 
     // Assert
@@ -153,10 +212,12 @@ describe('service token', () => {
     )
     expect(first).toEqual({
       authorization: 'Bearer service-token',
+      'x-api-key': 'test-api-key',
       'x-correlation-id': 'correlation'
     })
     expect(second).toEqual({
       authorization: 'Bearer service-token',
+      'x-api-key': 'test-api-key',
       'x-correlation-id': 'caller'
     })
   })

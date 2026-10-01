@@ -7,6 +7,7 @@ import { getServiceToken } from './service-token/issuer.js'
 const BAD_REQUEST = 400
 const UNPROCESSABLE_ENTITY = 422
 const SERVICE_UNAVAILABLE = 503
+const DEFAULT_TIMEOUT_MS = 3000
 
 const ABSOLUTE_URL_PATTERN = /^([a-z][a-z0-9+.-]*:|\/\/)/i
 
@@ -30,14 +31,24 @@ export class BaseClient {
   _serviceName
 
   /** @protected */
+  _apiKey
+
+  /** @protected */
   _timeout
 
   /**
-   * @param {{ environment: string, serviceName: string, port?: number, timeout?: number }} options
+   * @param {{ environment: string, serviceName: string, port?: number, apiKey?: string, timeout?: number }} options timeout is in milliseconds, default 3000, and applies to each of the response and body reads
    */
-  constructor({ environment, serviceName, port, timeout }) {
+  constructor({
+    environment,
+    serviceName,
+    port,
+    apiKey,
+    timeout = DEFAULT_TIMEOUT_MS
+  }) {
     this._baseUrl = getServiceBaseUrl(environment, serviceName, port).origin
     this._serviceName = serviceName
+    this._apiKey = apiKey
     this._timeout = timeout
   }
 
@@ -109,31 +120,36 @@ export class BaseClient {
   /**
    * @protected
    * @param {object} [callerHeaders] headers supplied on this call
-   * @returns {Promise<object>} correlation, caller and service token headers merged
+   * @returns {Promise<object>} correlation, api key, caller and service token headers merged
    */
-  async _buildHeaders(callerHeaders) {
+  async _buildHeaders(callerHeaders = {}) {
     const headers = { ...requestContext.getHeaders() }
-
-    const authorization = await this.#getAuthorization()
-    const otherCallerHeaders = Object.fromEntries(
-      Object.entries(callerHeaders ?? {}).filter(
-        ([name]) => name.toLowerCase() !== 'authorization'
-      )
-    )
-
-    return { ...headers, ...otherCallerHeaders, authorization }
-  }
-
-  async #getAuthorization() {
+    let authorizationToken
     try {
-      const token = await getServiceToken(this._serviceName)
-      return `Bearer ${token}`
+      authorizationToken = await getServiceToken(this._serviceName)
     } catch (cause) {
       throw new ServiceTokenError(
         `Failed to get a service token for ${this._serviceName}`,
         { cause }
       )
     }
+
+    headers['authorization'] = `Bearer ${authorizationToken}`
+
+    if (this._apiKey) {
+      headers['x-api-key'] = this._apiKey
+    }
+
+    for (const [key, value] of Object.entries(callerHeaders)) {
+      if (
+        key.toLowerCase() !== 'authorization' &&
+        key.toLowerCase() !== 'x-api-key'
+      ) {
+        headers[key] = value
+      }
+    }
+
+    return headers
   }
 
   /**
