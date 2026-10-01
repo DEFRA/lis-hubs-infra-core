@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { getModulesForHub } from '@defra/lis-hubs-infra-registry'
 import { createProxyPlugin } from './proxy-plugin.js'
+import { getServiceToken } from './service-token/issuer.js'
 
 vi.mock('@defra/lis-hubs-infra-registry')
+vi.mock('./service-token/issuer.js')
 
 const mocks = {
-  getModulesForHub: vi.mocked(getModulesForHub)
+  getModulesForHub: vi.mocked(getModulesForHub),
+  getServiceToken: vi.mocked(getServiceToken)
 }
 
 describe('createProxyPlugin()', () => {
@@ -15,6 +18,7 @@ describe('createProxyPlugin()', () => {
     mocks.getModulesForHub.mockReturnValue([
       { id: 'cattle-home', path: '/cattle', port: 3222 }
     ])
+    mocks.getServiceToken.mockResolvedValue('service-token')
   })
 
   test.each([
@@ -43,7 +47,7 @@ describe('createProxyPlugin()', () => {
     const route = server.route.mock.calls[0][0]
     expect(route).toMatchObject({ method: '*', path: '/cattle/{path*}' })
     expect(
-      route.handler.proxy.mapUri({
+      await route.handler.proxy.mapUri({
         params: { path: 'summary-data' },
         url: new URL('http://hub.test/cattle/summary-data'),
         headers: {
@@ -55,11 +59,12 @@ describe('createProxyPlugin()', () => {
       uri: `${expectedBaseUri}/summary-data`,
       headers: {
         'x-forwarded-prefix': '/cattle',
+        authorization: 'Bearer service-token',
         cookie: 'livestock_hub_jwt=hub.jwt.value'
       }
     })
     expect(
-      route.handler.proxy.mapUri({
+      await route.handler.proxy.mapUri({
         params: {},
         url: new URL('http://hub.test/cattle'),
         headers: {}
@@ -67,9 +72,61 @@ describe('createProxyPlugin()', () => {
     ).toEqual({
       uri: expectedBaseUri,
       headers: {
-        'x-forwarded-prefix': '/cattle'
+        'x-forwarded-prefix': '/cattle',
+        authorization: 'Bearer service-token'
       }
     })
+  })
+
+  test('sends a service token for the target spoke in place of the inbound authorization', async () => {
+    // Arrange
+    const server = { route: vi.fn(), register: vi.fn() }
+    const proxy = createProxyPlugin({
+      hubId: 'back-office',
+      environment: 'local',
+      hubJwtCookieName: 'livestock_hub_jwt'
+    })
+    const request = {
+      params: {},
+      url: new URL('http://hub.test/cattle'),
+      headers: { authorization: 'Bearer browser-token' }
+    }
+
+    // Act
+    await proxy.plugin.register(server)
+    const result =
+      await server.route.mock.calls[0][0].handler.proxy.mapUri(request)
+
+    // Assert
+    expect(mocks.getServiceToken).toHaveBeenCalledWith('lis-apps-cattle-home')
+    expect(result.headers.authorization).toBe('Bearer service-token')
+  })
+
+  test('rejects when the service token cannot be obtained', async () => {
+    // Arrange
+    mocks.getServiceToken.mockRejectedValue(new Error('sts down'))
+    const server = { route: vi.fn(), register: vi.fn() }
+    const proxy = createProxyPlugin({
+      hubId: 'back-office',
+      environment: 'local',
+      hubJwtCookieName: 'livestock_hub_jwt'
+    })
+    await proxy.plugin.register(server)
+
+    // Act
+    let error
+    try {
+      await server.route.mock.calls[0][0].handler.proxy.mapUri({
+        params: {},
+        url: new URL('http://hub.test/cattle'),
+        headers: {}
+      })
+    } catch (e) {
+      error = e
+    }
+
+    // Assert
+    expect(error.message).toBe('sts down')
   })
 
   test('forwards only the hub JWT cookie', async () => {
@@ -91,7 +148,8 @@ describe('createProxyPlugin()', () => {
 
     // Act
     await proxy.plugin.register(server)
-    const result = server.route.mock.calls[0][0].handler.proxy.mapUri(request)
+    const result =
+      await server.route.mock.calls[0][0].handler.proxy.mapUri(request)
 
     // Assert
     expect(result.headers.cookie).toBe('livestock_hub_jwt=hub.jwt.value')
@@ -114,10 +172,14 @@ describe('createProxyPlugin()', () => {
 
     // Act
     await proxy.plugin.register(server)
-    const result = server.route.mock.calls[0][0].handler.proxy.mapUri(request)
+    const result =
+      await server.route.mock.calls[0][0].handler.proxy.mapUri(request)
 
     // Assert
-    expect(result.headers).toEqual({ 'x-forwarded-prefix': '/cattle' })
+    expect(result.headers).toEqual({
+      'x-forwarded-prefix': '/cattle',
+      authorization: 'Bearer service-token'
+    })
     expect(request.headers).toEqual({})
   })
 
@@ -150,7 +212,7 @@ describe('createProxyPlugin()', () => {
 
     // Act
     await proxy.plugin.register(server)
-    server.route.mock.calls[0][0].handler.proxy.mapUri(request)
+    await server.route.mock.calls[0][0].handler.proxy.mapUri(request)
 
     // Assert
     expect(request.headers).toEqual({ accept: 'text/html' })
@@ -171,7 +233,7 @@ describe('createProxyPlugin()', () => {
     // Assert
     const route = server.route.mock.calls[0][0]
     expect(
-      route.handler.proxy.mapUri({
+      await route.handler.proxy.mapUri({
         params: { path: 'animals' },
         url: new URL(
           'http://hub.test/cattle/animals?sort=sex&direction=asc&page=1'

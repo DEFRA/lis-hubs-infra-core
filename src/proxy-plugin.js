@@ -2,6 +2,7 @@ import h2o2 from '@hapi/h2o2'
 
 import { getModulesForHub } from '@defra/lis-hubs-infra-registry'
 import { getServiceBaseUrl } from './get-service-base-url.js'
+import { getServiceToken } from './service-token/issuer.js'
 
 /**
  * @param {string | undefined} cookieHeader
@@ -35,9 +36,10 @@ export function createProxyPlugin({ hubId, environment, hubJwtCookieName }) {
         await server.register(h2o2)
 
         for (const { id: moduleName, path, port } of modules) {
+          const serviceName = `lis-apps-${moduleName}`
           const baseUri = getServiceBaseUrl(
             environment,
-            `lis-apps-${moduleName}`,
+            serviceName,
             port
           ).origin
 
@@ -48,7 +50,7 @@ export function createProxyPlugin({ hubId, environment, hubJwtCookieName }) {
               proxy: {
                 passThrough: true,
                 xforward: true,
-                mapUri(request) {
+                async mapUri(request) {
                   const subPath = request.params.path ?? ''
                   const uri =
                     (subPath ? `${baseUri}/${subPath}` : baseUri) +
@@ -69,6 +71,7 @@ export function createProxyPlugin({ hubId, environment, hubJwtCookieName }) {
                     uri,
                     headers: {
                       'x-forwarded-prefix': path,
+                      authorization: `Bearer ${await getServiceToken(serviceName)}`,
                       ...(hubJwtCookie && { cookie: hubJwtCookie })
                     }
                   }
