@@ -2,7 +2,9 @@ import { GetWebIdentityTokenCommand, STSClient } from '@aws-sdk/client-sts'
 
 import { SIGNING_ALGORITHM } from './constants.js'
 
-const DURATION_SECONDS = 900
+const MAX_DURATION_SECONDS = 900
+const MIN_DURATION_SECONDS = 60
+const SESSION_EXPIRY_MARGIN_SECONDS = 60
 const REFRESH_BEFORE_EXPIRY_SECONDS = 60
 const MILLISECONDS_PER_SECOND = 1000
 
@@ -18,12 +20,38 @@ const cache = new Map()
 /** @type {Map<string, Promise<string>>} */
 const inFlight = new Map()
 
+/**
+ * A token can't outlive the role session that requests it (STS rejects that
+ * with SessionDurationEscalation), and the SDK keeps credentials until they
+ * are 5 minutes from expiry, so the duration is capped by the time the
+ * current credentials have left.
+ *
+ * @returns {Promise<number>}
+ */
+async function getTokenDurationSeconds() {
+  const { expiration } = await stsClient.config.credentials()
+  if (!expiration) {
+    return MAX_DURATION_SECONDS
+  }
+
+  const secondsLeft =
+    Math.floor((expiration.getTime() - Date.now()) / MILLISECONDS_PER_SECOND) -
+    SESSION_EXPIRY_MARGIN_SECONDS
+  if (secondsLeft < MIN_DURATION_SECONDS) {
+    throw new Error(
+      'The role session expires too soon to issue a service token'
+    )
+  }
+
+  return Math.min(MAX_DURATION_SECONDS, secondsLeft)
+}
+
 async function fetchToken(audience) {
   // Tags are deliberately omitted: they are rejected on CDP container roles.
   const response = await stsClient.send(
     new GetWebIdentityTokenCommand({
       Audience: [audience],
-      DurationSeconds: DURATION_SECONDS,
+      DurationSeconds: await getTokenDurationSeconds(),
       SigningAlgorithm: SIGNING_ALGORITHM
     })
   )
