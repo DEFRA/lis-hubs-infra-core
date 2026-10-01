@@ -8,6 +8,9 @@ vi.mock('@aws-sdk/client-sts', async (importOriginal) => ({
 
 const NOW = new Date('2026-01-01T00:00:00Z')
 
+// Lets background work queued on resolved promises run.
+const flushPromises = () => new Promise((resolve) => process.nextTick(resolve))
+
 function tokenResponse(token, secondsFromNow = 900) {
   return {
     WebIdentityToken: token,
@@ -17,6 +20,7 @@ function tokenResponse(token, secondsFromNow = 900) {
 
 describe('getServiceToken()', () => {
   let send
+  let credentials
   let getServiceToken
 
   beforeEach(async () => {
@@ -24,8 +28,10 @@ describe('getServiceToken()', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     send = vi.fn()
+    credentials = vi.fn().mockResolvedValue({})
     vi.mocked(STSClient).mockImplementation(function () {
       this.send = send
+      this.config = { credentials }
     })
     ;({ getServiceToken } = await import('./issuer.js'))
   })
@@ -74,6 +80,61 @@ describe('getServiceToken()', () => {
     })
   })
 
+  test.each([
+    ['credentials with no expiry', undefined, 900],
+    ['credentials with an hour left', 3600, 900],
+    ['credentials 10 minutes from expiry', 600, 540],
+    ['credentials 5 minutes from expiry', 300, 240]
+  ])(
+    'requests a duration that ends before the role session, for %s',
+    async (_, credentialsSecondsLeft, expectedDuration) => {
+      // Arrange
+      credentials.mockResolvedValue(
+        credentialsSecondsLeft === undefined
+          ? {}
+          : {
+              expiration: new Date(
+                NOW.getTime() + credentialsSecondsLeft * 1000
+              )
+            }
+      )
+      send.mockResolvedValueOnce(tokenResponse('t1', expectedDuration))
+
+      // Act
+      await getServiceToken('lis-apps-cattle-home')
+
+      // Assert
+      expect(send.mock.calls[0][0].input.DurationSeconds).toBe(expectedDuration)
+    }
+  )
+
+  test.each([
+    ['expires too soon', 119],
+    ['has already expired', -30]
+  ])(
+    'rejects without calling STS when the role session %s',
+    async (_, credentialsSecondsLeft) => {
+      // Arrange
+      credentials.mockResolvedValue({
+        expiration: new Date(NOW.getTime() + credentialsSecondsLeft * 1000)
+      })
+
+      // Act
+      let error
+      try {
+        await getServiceToken('lis-apps-cattle-home')
+      } catch (e) {
+        error = e
+      }
+
+      // Assert
+      expect(error.message).toBe(
+        'The role session expires too soon to issue a service token'
+      )
+      expect(send).not.toHaveBeenCalled()
+    }
+  )
+
   test('reuses the cached token before the refresh window', async () => {
     // Arrange
     send.mockResolvedValueOnce(tokenResponse('t1'))
@@ -98,6 +159,7 @@ describe('getServiceToken()', () => {
 
     // Act
     const result = await getServiceToken('aud')
+    await flushPromises()
 
     // Assert
     expect(result).toBe('t1')
