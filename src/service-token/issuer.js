@@ -65,7 +65,7 @@ export async function getServiceToken(audience) {
 
 function refreshToken(audience) {
   const pending = inFlight.get(audience)
-  if (pending) {
+  if (pending !== undefined) {
     return pending
   }
 
