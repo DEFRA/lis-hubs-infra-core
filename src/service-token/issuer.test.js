@@ -316,6 +316,7 @@ describe('getServiceToken()', () => {
     }
 
     // Assert
+    expect(error).toBeInstanceOf(TypeError)
     expect(error.message).toBe(
       'STS response did not include a valid Expiration'
     )
