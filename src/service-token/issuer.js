@@ -62,7 +62,7 @@ async function fetchToken(audience) {
 
   const expiresAt = new Date(response.Expiration).getTime()
   if (Number.isNaN(expiresAt)) {
-    throw new Error('STS response did not include a valid Expiration')
+    throw new TypeError('STS response did not include a valid Expiration')
   }
 
   cache.set(audience, { token: response.WebIdentityToken, expiresAt })
