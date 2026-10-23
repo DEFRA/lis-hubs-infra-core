@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { createServer } from 'node:http'
 
 import Wreck from '@hapi/wreck'
 
@@ -166,6 +167,72 @@ describe('request verbs', () => {
       'override-id'
     )
   })
+})
+
+describe('configured timeout with an upstream server', () => {
+  let server
+
+  beforeEach(async () => {
+    server = createServer()
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+    mocks.getServiceBaseUrl.mockReturnValue(
+      new URL(`http://127.0.0.1:${server.address().port}`)
+    )
+  })
+
+  afterEach(async () => {
+    server.closeAllConnections()
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()))
+    })
+  })
+
+  test('it returns the response within a non-default timeout', async () => {
+    // Arrange
+    const client = createClient({ timeout: 1000 })
+    server.on('request', (_request, response) => {
+      response.setHeader('content-type', 'application/json')
+      response.end(JSON.stringify({ data: [] }))
+    })
+
+    // Act
+    const { res, payload } = await client._get('api/cattle')
+
+    // Assert
+    expect(res.statusCode).toBe(200)
+    expect(payload).toEqual({ data: [] })
+  })
+
+  test('it times out waiting for response headers using the configured timeout', async () => {
+    // Arrange
+    const client = createClient({ timeout: 50 })
+    server.on('request', () => {
+      // Keep the connection open without sending response headers.
+    })
+
+    // Act / Assert
+    await expect(client._get('api/cattle')).rejects.toMatchObject({
+      message: 'Request failed - 504',
+      statusCode: 504
+    })
+  }, 1000)
+
+  test('it times out reading the response body using the configured timeout', async () => {
+    // Arrange
+    const client = createClient({ timeout: 50 })
+    server.on('request', (_request, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.flushHeaders()
+      response.write('{"data":')
+      // Leave the body unfinished so that its read times out.
+    })
+
+    // Act / Assert
+    await expect(client._get('api/cattle')).rejects.toMatchObject({
+      message: 'Request failed - 200',
+      statusCode: 200
+    })
+  }, 1000)
 })
 
 describe('service token', () => {
