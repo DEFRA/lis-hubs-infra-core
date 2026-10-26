@@ -1,8 +1,11 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import Boom from '@hapi/boom'
 
 import { getModulesForHub } from '@defra/lis-hubs-infra-registry'
 import { createProxyPlugin } from './proxy-plugin.js'
 import { getServiceToken } from './service-token/issuer.js'
+import { logger } from './logging/index.js'
+import { ServiceTokenError } from './base-client.js'
 
 vi.mock('@defra/lis-hubs-infra-registry')
 vi.mock('./service-token/issuer.js')
@@ -19,6 +22,10 @@ describe('createProxyPlugin()', () => {
       { id: 'cattle-home', path: '/cattle', port: 3222 }
     ])
     mocks.getServiceToken.mockResolvedValue('service-token')
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   test.each([
@@ -102,9 +109,12 @@ describe('createProxyPlugin()', () => {
     expect(result.headers.authorization).toBe('Bearer service-token')
   })
 
-  test('rejects when the service token cannot be obtained', async () => {
+  test('rejects with an error naming the spoke when the service token cannot be obtained', async () => {
     // Arrange
-    mocks.getServiceToken.mockRejectedValue(new Error('sts down'))
+    const stsError = new Error('sts down')
+    mocks.getServiceToken.mockRejectedValue(stsError)
+    const errorSpy = vi.fn()
+    vi.spyOn(logger, 'error', 'get').mockReturnValue(errorSpy)
     const server = { route: vi.fn(), register: vi.fn() }
     const proxy = createProxyPlugin({
       hubId: 'back-office',
@@ -126,7 +136,113 @@ describe('createProxyPlugin()', () => {
     }
 
     // Assert
-    expect(error.message).toBe('sts down')
+    expect(error).toBeInstanceOf(ServiceTokenError)
+    expect(error.message).toBe(
+      'Service token unavailable for spoke lis-apps-cattle-home'
+    )
+    expect(error.statusCode).toBe(503)
+    expect(error.cause).toBe(stsError)
+    expect(errorSpy).not.toHaveBeenCalled()
+  })
+
+  test.each([502, 504])(
+    'turns a failed spoke request into a %i Boom error naming the spoke, without logging',
+    async (statusCode) => {
+      // Arrange
+      const errorSpy = vi.fn()
+      vi.spyOn(logger, 'error', 'get').mockReturnValue(errorSpy)
+      const server = { route: vi.fn(), register: vi.fn() }
+      const proxy = createProxyPlugin({
+        hubId: 'back-office',
+        environment: 'local',
+        hubJwtCookieName: 'livestock_hub_jwt'
+      })
+      await proxy.plugin.register(server)
+      const upstreamError = Boom.boomify(new Error('Client request error'), {
+        statusCode
+      })
+
+      // Act
+      const result = server.route.mock.calls[0][0].handler.proxy.onResponse(
+        upstreamError,
+        undefined,
+        { method: 'get', path: '/cattle/animals' },
+        {}
+      )
+
+      // Assert
+      expect(Boom.isBoom(result)).toBe(true)
+      expect(result.output.statusCode).toBe(statusCode)
+      expect(result.message).toBe(
+        'Spoke lis-apps-cattle-home request failed: Client request error'
+      )
+      expect(result.cause).toBe(upstreamError)
+      expect(result.output.payload).toEqual({
+        statusCode,
+        error: statusCode === 502 ? 'Bad Gateway' : 'Gateway Time-out',
+        message: 'An internal server error occurred'
+      })
+      expect(errorSpy).not.toHaveBeenCalled()
+    }
+  )
+
+  test('defaults a failed spoke request without a status to 502', async () => {
+    // Arrange
+    const server = { route: vi.fn(), register: vi.fn() }
+    const proxy = createProxyPlugin({
+      hubId: 'back-office',
+      environment: 'local',
+      hubJwtCookieName: 'livestock_hub_jwt'
+    })
+    await proxy.plugin.register(server)
+    const upstreamError = new Error('socket hang up')
+
+    // Act
+    const result = server.route.mock.calls[0][0].handler.proxy.onResponse(
+      upstreamError,
+      undefined,
+      { method: 'get', path: '/cattle' },
+      {}
+    )
+
+    // Assert
+    expect(result.output.statusCode).toBe(502)
+    expect(result.cause).toBe(upstreamError)
+  })
+
+  test('passes the spoke response through when the request succeeds', async () => {
+    // Arrange
+    const errorSpy = vi.fn()
+    vi.spyOn(logger, 'error', 'get').mockReturnValue(errorSpy)
+    const server = { route: vi.fn(), register: vi.fn() }
+    const proxy = createProxyPlugin({
+      hubId: 'back-office',
+      environment: 'local',
+      hubJwtCookieName: 'livestock_hub_jwt'
+    })
+    await proxy.plugin.register(server)
+    const response = { statusCode: 302 }
+    const passedThrough = { passedThrough: true }
+    const toolkitResponse = {
+      code: vi.fn().mockReturnThis(),
+      passThrough: vi.fn().mockReturnValue(passedThrough)
+    }
+    const h = { response: vi.fn().mockReturnValue(toolkitResponse) }
+
+    // Act
+    const result = server.route.mock.calls[0][0].handler.proxy.onResponse(
+      null,
+      response,
+      { method: 'get', path: '/cattle' },
+      h
+    )
+
+    // Assert
+    expect(h.response).toHaveBeenCalledWith(response)
+    expect(toolkitResponse.code).toHaveBeenCalledWith(302)
+    expect(toolkitResponse.passThrough).toHaveBeenCalledWith(true)
+    expect(result).toBe(passedThrough)
+    expect(errorSpy).not.toHaveBeenCalled()
   })
 
   test('forwards only the hub JWT cookie', async () => {

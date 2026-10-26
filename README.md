@@ -102,7 +102,9 @@ class CattleHomeBe4FeClient extends BaseClient {
 
 `_get`, `_post`, `_put`, `_patch` and `_delete` take a path and
 [Wreck](https://hapi.dev/module/wreck/) options. If a service token can't be obtained, they throw
-`ServiceTokenError`.
+`ServiceTokenError`. Other thrown errors carry `statusCode`, `serviceName`, `method`, `path` and `cause`
+for code that catches the error. The shared logger emits only the error's type, message and stack,
+so a caller that wants them in a log line must put them in the message or `logger.context`.
 
 Locally, lis-dev's `lis-fake-sts` service stands in for AWS STS. See
 [Service-to-service auth](https://github.com/DEFRA/lis-dev#service-to-service-auth) in lis-dev.

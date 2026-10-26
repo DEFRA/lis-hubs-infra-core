@@ -86,6 +86,27 @@ describe('Logger', () => {
       expect(logLine.toString()).not.toContain('secret-token')
       expect(logLine.toString()).not.toContain('secret-session')
     })
+
+    test('it removes an identity provider error_description from the request query', () => {
+      // Arrange
+      const freshLogging = new logger.constructor()
+      const writeSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation(() => true)
+
+      // Act
+      freshLogging.info({
+        req: {
+          query: { error: 'access_denied', error_description: 'free text' }
+        }
+      })
+      const [logLine] = writeSpy.mock.calls[0]
+      writeSpy.mockRestore()
+
+      // Assert
+      expect(logLine.toString()).toContain('access_denied')
+      expect(logLine.toString()).not.toContain('free text')
+    })
   })
   describe.each(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])(
     '%s',
@@ -294,6 +315,33 @@ describe('Logger', () => {
       const parsed = JSON.parse(logLine.toString())
       expect(parsed.trace).toBeUndefined()
       expect(parsed.tenant).toBeUndefined()
+    })
+  })
+
+  describe('errors', () => {
+    test('drops non-standard properties from logged errors', () => {
+      // Arrange
+      const freshLogging = new logger.constructor()
+      const writeSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation(() => true)
+      const err = new Error('outer', { cause: new Error('inner') })
+      err.command = { name: 'set', args: ['secret-payload'] }
+      err.code = 'X'
+
+      // Act
+      freshLogging.error({ err }, 'command failed')
+      const [logLine] = writeSpy.mock.calls[0]
+      writeSpy.mockRestore()
+
+      // Assert
+      const serialised = logLine.toString()
+      expect(Object.keys(JSON.parse(serialised).error).toSorted()).toEqual([
+        'message',
+        'stack_trace',
+        'type'
+      ])
+      expect(serialised).not.toContain('secret-payload')
     })
   })
 })
