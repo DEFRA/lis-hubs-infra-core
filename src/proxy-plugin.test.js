@@ -156,6 +156,85 @@ describe('createProxyPlugin()', () => {
     expect(request.headers).toEqual({})
   })
 
+  test('forwards the named cookies alongside the hub JWT, in the browser order', async () => {
+    // Arrange
+    const server = { route: vi.fn(), register: vi.fn() }
+    const proxy = createProxyPlugin({
+      hubId: 'back-office',
+      environment: 'local',
+      hubJwtCookieName: 'livestock_hub_jwt',
+      forwardedCookieNames: ['cookies_policy']
+    })
+    const request = {
+      params: { path: 'animals' },
+      url: new URL('http://hub.test/cattle/animals'),
+      headers: {
+        cookie:
+          'cookies_policy=%7B%22analytics%22%3Afalse%7D; front-office-session=abc; livestock_hub_jwt=hub.jwt.value'
+      }
+    }
+
+    // Act
+    await proxy.plugin.register(server)
+    const result =
+      await server.route.mock.calls[0][0].handler.proxy.mapUri(request)
+
+    // Assert
+    expect(result.headers.cookie).toBe(
+      'cookies_policy=%7B%22analytics%22%3Afalse%7D; livestock_hub_jwt=hub.jwt.value'
+    )
+    expect(request.headers).toEqual({})
+  })
+
+  test('forwards a named cookie on its own when there is no hub JWT cookie', async () => {
+    // Arrange
+    const server = { route: vi.fn(), register: vi.fn() }
+    const proxy = createProxyPlugin({
+      hubId: 'back-office',
+      environment: 'local',
+      hubJwtCookieName: 'livestock_hub_jwt',
+      forwardedCookieNames: ['cookies_policy']
+    })
+    const request = {
+      params: {},
+      url: new URL('http://hub.test/cattle'),
+      headers: { cookie: 'front-office-session=abc; cookies_policy=x' }
+    }
+
+    // Act
+    await proxy.plugin.register(server)
+    const result =
+      await server.route.mock.calls[0][0].handler.proxy.mapUri(request)
+
+    // Assert
+    expect(result.headers.cookie).toBe('cookies_policy=x')
+  })
+
+  test.each([['not an array'], [[42]], [['']]])(
+    'rejects forwardedCookieNames %j',
+    (forwardedCookieNames) => {
+      // Arrange
+      let error
+
+      // Act
+      try {
+        createProxyPlugin({
+          hubId: 'back-office',
+          environment: 'local',
+          hubJwtCookieName: 'livestock_hub_jwt',
+          forwardedCookieNames
+        })
+      } catch (e) {
+        error = e
+      }
+
+      // Assert
+      expect(error.message).toBe(
+        'forwardedCookieNames must be an array of cookie names'
+      )
+    }
+  )
+
   test('sends no cookie when there is no hub JWT cookie', async () => {
     // Arrange
     const server = { route: vi.fn(), register: vi.fn() }

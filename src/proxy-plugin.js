@@ -6,24 +6,43 @@ import { getServiceToken } from './service-token/issuer.js'
 
 /**
  * @param {string | undefined} cookieHeader
- * @param {string} name
- * @returns {string | undefined} the raw `name=value` pair, encoding untouched
+ * @param {string[]} names
+ * @returns {string | undefined} a cookie header of the named cookies that are present, in the browser's order, raw `name=value` pairs with encoding untouched
  */
-function findCookie(cookieHeader, name) {
-  return cookieHeader
+function pickCookies(cookieHeader, names) {
+  const picked = cookieHeader
     ?.split(';')
     .map((cookie) => cookie.trim())
-    .find((cookie) => cookie.startsWith(`${name}=`))
+    .filter((cookie) => names.some((name) => cookie.startsWith(`${name}=`)))
+
+  return picked?.length ? picked.join('; ') : undefined
 }
 
 /**
- * @param {{ hubId: string, environment: string, hubJwtCookieName: string }} options
+ * @param {object} options
+ * @param {string} options.hubId
+ * @param {string} options.environment
+ * @param {string} options.hubJwtCookieName - the cookie that identifies the user to the spoke
+ * @param {string[]} [options.forwardedCookieNames] - other browser cookies the spoke may see, such as the cookie consent choice; none by default
  * @returns {{ plugin: { name: string, register: Function } }}
  */
-export function createProxyPlugin({ hubId, environment, hubJwtCookieName }) {
+export function createProxyPlugin({
+  hubId,
+  environment,
+  hubJwtCookieName,
+  forwardedCookieNames = []
+}) {
   if (!hubJwtCookieName) {
     throw new Error('hubJwtCookieName is required')
   }
+  if (
+    !Array.isArray(forwardedCookieNames) ||
+    forwardedCookieNames.some((name) => typeof name !== 'string' || !name)
+  ) {
+    throw new Error('forwardedCookieNames must be an array of cookie names')
+  }
+
+  const cookieNames = [hubJwtCookieName, ...forwardedCookieNames]
 
   const modules = getModulesForHub(hubId).toSorted(
     (a, b) => b.path.split('/').length - a.path.split('/').length
@@ -59,10 +78,11 @@ export function createProxyPlugin({ hubId, environment, hubJwtCookieName }) {
                   // passThrough copies request.headers itself and merges these
                   // headers on top, so a header can only be withheld from the
                   // spoke by removing it from the request. The spoke only gets
-                  // the hub JWT cookie, never the hub's session or credentials.
-                  const hubJwtCookie = findCookie(
+                  // the hub JWT cookie and the cookies named as forwarded,
+                  // never the hub's session or credentials.
+                  const forwardedCookies = pickCookies(
                     request.headers.cookie,
-                    hubJwtCookieName
+                    cookieNames
                   )
                   delete request.headers.authorization
                   delete request.headers.cookie
@@ -72,7 +92,7 @@ export function createProxyPlugin({ hubId, environment, hubJwtCookieName }) {
                     headers: {
                       'x-forwarded-prefix': path,
                       authorization: `Bearer ${await getServiceToken(serviceName)}`,
-                      ...(hubJwtCookie && { cookie: hubJwtCookie })
+                      ...(forwardedCookies && { cookie: forwardedCookies })
                     }
                   }
                 }
