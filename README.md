@@ -111,15 +111,19 @@ Locally, lis-dev's `lis-fake-sts` service stands in for AWS STS. See
 
 `createProxyPlugin` is used by hubs. It registers a proxy route for every module that
 `@defra/lis-hubs-infra-registry` lists for the hub, forwarding requests to that module's spoke and
-forwarding only the hub JWT cookie, never the hub session cookie or the `Authorization` header.
+forwarding only the hub JWT cookie and any cookies named in `forwardedCookieNames` (for example
+the cookie consent choice, which the spoke's layout needs to decide whether to show the banner),
+never the hub session cookie or the `Authorization` header.
 
 ```js
 import { createProxyPlugin } from '@defra/lis-hubs-infra-core'
+import { COOKIES_POLICY_COOKIE_NAME } from '@defra/lis-infra-ui-services/cookies/cookies-policy'
 
 const proxy = createProxyPlugin({
   hubId: 'front-office',
   environment: config.get('environment'),
-  hubJwtCookieName: config.get('auth.hubJwt.cookieName')
+  hubJwtCookieName: config.get('auth.hubJwt.cookieName'),
+  forwardedCookieNames: [COOKIES_POLICY_COOKIE_NAME] // optional, none by default
 })
 
 await server.register(proxy.plugin)
