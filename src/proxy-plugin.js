@@ -1,8 +1,13 @@
+import Boom from '@hapi/boom'
 import h2o2 from '@hapi/h2o2'
 
 import { getModulesForHub } from '@defra/lis-hubs-infra-registry'
 import { getServiceBaseUrl } from './get-service-base-url.js'
 import { getServiceToken } from './service-token/issuer.js'
+import { ServiceTokenError } from './base-client.js'
+
+const BAD_GATEWAY = 502
+const GENERIC_ERROR_MESSAGE = 'An internal server error occurred'
 
 /**
  * @param {string | undefined} cookieHeader
@@ -16,6 +21,50 @@ function pickCookies(cookieHeader, names) {
     .filter((cookie) => names.some((name) => cookie.startsWith(`${name}=`)))
 
   return picked?.length ? picked.join('; ') : undefined
+}
+
+/**
+ * @param {string} serviceName
+ * @returns {Promise<string>} a service token for the spoke
+ * @throws {ServiceTokenError} naming the spoke, so the hub's error log says which one
+ */
+async function getSpokeServiceToken(serviceName) {
+  try {
+    return await getServiceToken(serviceName)
+  } catch (err) {
+    throw new ServiceTokenError(
+      `Service token unavailable for spoke ${serviceName}`,
+      { cause: err }
+    )
+  }
+}
+
+/**
+ * h2o2 onResponse. An upstream failure becomes a Boom error naming the spoke,
+ * keeping the upstream status, so the hub's error handler logs it once with
+ * that context, while the response body stays generic. A response is passed
+ * through as h2o2 does by default.
+ *
+ * @param {string} serviceName
+ * @returns {Function} an h2o2 onResponse handler
+ */
+function wrapSpokeFailure(serviceName) {
+  return function onResponse(err, res, _request, h) {
+    if (err) {
+      const wrapped = new Error(
+        `Spoke ${serviceName} request failed: ${err.message}`,
+        { cause: err }
+      )
+      const boom = Boom.boomify(wrapped, {
+        statusCode: err.output?.statusCode ?? BAD_GATEWAY
+      })
+      // Boom only hides the message of a 500; this one names the spoke and
+      // the upstream address, which the browser must not see.
+      boom.output.payload.message = GENERIC_ERROR_MESSAGE
+      return boom
+    }
+    return h.response(res).code(res.statusCode).passThrough(true)
+  }
 }
 
 /**
@@ -69,6 +118,7 @@ export function createProxyPlugin({
               proxy: {
                 passThrough: true,
                 xforward: true,
+                onResponse: wrapSpokeFailure(serviceName),
                 async mapUri(request) {
                   const subPath = request.params.path ?? ''
                   const uri =
@@ -91,7 +141,7 @@ export function createProxyPlugin({
                     uri,
                     headers: {
                       'x-forwarded-prefix': path,
-                      authorization: `Bearer ${await getServiceToken(serviceName)}`,
+                      authorization: `Bearer ${await getSpokeServiceToken(serviceName)}`,
                       ...(forwardedCookies && { cookie: forwardedCookies })
                     }
                   }

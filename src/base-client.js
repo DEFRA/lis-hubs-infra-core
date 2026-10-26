@@ -178,25 +178,35 @@ export class BaseClient {
       if (error instanceof ServiceTokenError) {
         throw error
       }
-      throw this.#parseError(error.output?.statusCode, error.data?.payload)
+      throw this.#parseError(
+        { method, path, cause: error },
+        error.output?.statusCode,
+        error.data?.payload
+      )
     }
 
     let payload
 
     try {
       payload = await Wreck.read(res, options)
-    } catch {
-      throw this.#parseError(res.statusCode)
+    } catch (error) {
+      throw this.#parseError({ method, path, cause: error }, res.statusCode)
     }
 
     if (res.statusCode >= BAD_REQUEST) {
-      throw this.#parseError(res.statusCode, payload)
+      throw this.#parseError({ method, path }, res.statusCode, payload)
     }
 
     return { res, payload }
   }
 
-  #parseError(statusCode, payload) {
+  /**
+   * @param {{ method: string, path: string, cause?: Error }} request the failed call, and the underlying error if there was one
+   * @param {number} [statusCode]
+   * @param {object} [payload] the upstream error body
+   * @returns {Error} an error carrying statusCode, serviceName, method, path and cause, for whoever logs it
+   */
+  #parseError({ method, path, cause }, statusCode, payload) {
     let message
 
     if (payload?.error?.code) {
@@ -209,8 +219,11 @@ export class BaseClient {
       message = `Request failed - ${statusCode}`
     }
 
-    const error = new Error(message)
+    const error = new Error(message, cause && { cause })
     error.statusCode = statusCode
+    error.serviceName = this._serviceName
+    error.method = method
+    error.path = path
     return error
   }
 }

@@ -39,6 +39,7 @@ describe('getServiceToken()', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+    vi.restoreAllMocks()
   })
 
   test('builds one STS client, with request timeouts and limited attempts', async () => {
@@ -205,6 +206,9 @@ describe('getServiceToken()', () => {
 
   test('keeps serving the cached token when a background refresh fails and retries on the next call', async () => {
     // Arrange
+    const { logger } = await import('../logging/index.js')
+    const warnSpy = vi.fn()
+    vi.spyOn(logger, 'warn', 'get').mockReturnValue(warnSpy)
     send
       .mockResolvedValueOnce(tokenResponse('t1'))
       .mockRejectedValueOnce(new Error('sts down'))
@@ -224,6 +228,30 @@ describe('getServiceToken()', () => {
     expect(afterFailure).toBe('t1')
     expect(afterRetry).toBe('t2')
     expect(send).toHaveBeenCalledTimes(3)
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('logs a warning with the audience when a background refresh fails', async () => {
+    // Arrange
+    const { logger } = await import('../logging/index.js')
+    const warnSpy = vi.fn()
+    vi.spyOn(logger, 'warn', 'get').mockReturnValue(warnSpy)
+    const stsError = new Error('sts down')
+    send
+      .mockResolvedValueOnce(tokenResponse('t1'))
+      .mockRejectedValueOnce(stsError)
+    await getServiceToken('aud')
+    vi.setSystemTime(new Date(NOW.getTime() + 840 * 1000))
+
+    // Act
+    await getServiceToken('aud')
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Assert
+    expect(warnSpy).toHaveBeenCalledWith(
+      { err: stsError },
+      'Background service token refresh failed for aud; keeping cached token'
+    )
   })
 
   test('caches tokens separately per audience', async () => {

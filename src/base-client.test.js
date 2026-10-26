@@ -415,6 +415,13 @@ describe('error handling', () => {
     // Assert
     expect(error).toBeInstanceOf(Error)
     expect(error.message).toBe('404 - CPH not found')
+    expect(error).toMatchObject({
+      statusCode: 404,
+      serviceName: 'lis-be4fe-cattle-home',
+      method: 'GET',
+      path: 'api/cphs/missing/cattle'
+    })
+    expect(error.cause).toBeUndefined()
   })
 
   test('it throws a generic validation error for a 422 response', async () => {
@@ -476,13 +483,21 @@ describe('error handling', () => {
     // Assert
     expect(error).toBeInstanceOf(Error)
     expect(error.message).toBe('Request failed - 503')
+    expect(error).toMatchObject({
+      statusCode: 503,
+      serviceName: 'lis-be4fe-cattle-home',
+      method: 'GET',
+      path: 'api/users/user-1/cphs'
+    })
+    expect(error.cause).toBe(wreckError)
   })
 
   test('it throws when the response body cannot be read', async () => {
     // Arrange
     const client = createClient()
     vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
-    vi.spyOn(Wreck, 'read').mockRejectedValue(new Error('Invalid JSON'))
+    const readError = new Error('Invalid JSON')
+    vi.spyOn(Wreck, 'read').mockRejectedValue(readError)
 
     // Act
     let error
@@ -495,5 +510,12 @@ describe('error handling', () => {
     // Assert
     expect(error).toBeInstanceOf(Error)
     expect(error.message).toBe('Request failed - 200')
+    expect(error).toMatchObject({
+      statusCode: 200,
+      serviceName: 'lis-be4fe-cattle-home',
+      method: 'GET',
+      path: 'api/users/user-1/cphs'
+    })
+    expect(error.cause).toBe(readError)
   })
 })

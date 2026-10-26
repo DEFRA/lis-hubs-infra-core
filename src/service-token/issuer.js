@@ -1,6 +1,7 @@
 import { GetWebIdentityTokenCommand, STSClient } from '@aws-sdk/client-sts'
 
 import { SIGNING_ALGORITHM } from './constants.js'
+import { logger } from '../logging/index.js'
 
 const MAX_DURATION_SECONDS = 900
 const MIN_DURATION_SECONDS = 60
@@ -83,7 +84,12 @@ export async function getServiceToken(audience) {
     if (now >= refreshFrom) {
       // Callers keep the still-valid token; a failure leaves it cached so a
       // later call retries.
-      refreshToken(audience).catch(() => undefined)
+      refreshToken(audience).catch((err) =>
+        logger.warn(
+          { err },
+          `Background service token refresh failed for ${audience}; keeping cached token`
+        )
+      )
     }
     return cached.token
   }

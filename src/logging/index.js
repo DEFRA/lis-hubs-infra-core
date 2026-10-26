@@ -12,11 +12,13 @@ const defaultIgnorePath = (_, request) =>
 
 const validFormats = new Set(['ecs', 'pretty-print'])
 
-// Standardised, non-configurable across every consumer - these headers
-// must never reach logs.
+// Standardised, non-configurable across every consumer - these must never
+// reach logs. error_description is free text an identity provider returns on
+// its callback, so it is kept out of the request line.
 const redactPaths = [
   'req.headers.authorization',
   'req.headers.cookie',
+  'req.query.error_description',
   'res.headers'
 ]
 
