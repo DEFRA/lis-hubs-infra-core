@@ -86,7 +86,7 @@ export async function getServiceToken(audience) {
       // later call retries.
       refreshToken(audience).catch((err) =>
         logger.warn(
-          { err },
+          err,
           `Background service token refresh failed for ${audience}; keeping cached token`
         )
       )

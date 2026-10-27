@@ -249,7 +249,7 @@ describe('getServiceToken()', () => {
 
     // Assert
     expect(warnSpy).toHaveBeenCalledWith(
-      { err: stsError },
+      stsError,
       'Background service token refresh failed for aud; keeping cached token'
     )
   })
