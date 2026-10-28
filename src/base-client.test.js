@@ -6,16 +6,22 @@ import Wreck from '@hapi/wreck'
 import * as requestContext from './request-context.js'
 import { getServiceBaseUrl } from './get-service-base-url.js'
 import { getServiceToken } from './service-token/issuer.js'
+import { CircuitBreaker } from './circuit-breaker.js'
 import { BaseClient, ServiceTokenError } from './base-client.js'
 
 vi.mock('./request-context.js')
 vi.mock('./get-service-base-url.js')
 vi.mock('./service-token/issuer.js')
+vi.mock('./circuit-breaker.js')
 
 const mocks = {
   requestContextGetHeaders: vi.mocked(requestContext.getHeaders),
   getServiceBaseUrl: vi.mocked(getServiceBaseUrl),
-  getServiceToken: vi.mocked(getServiceToken)
+  getServiceToken: vi.mocked(getServiceToken),
+  CircuitBreaker: vi.mocked(CircuitBreaker),
+  assertCallAllowed: vi.mocked(CircuitBreaker.prototype.assertCallAllowed),
+  recordSuccess: vi.mocked(CircuitBreaker.prototype.recordSuccess),
+  recordFailure: vi.mocked(CircuitBreaker.prototype.recordFailure)
 }
 
 function createClient(options = {}) {
@@ -37,6 +43,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.clearAllMocks()
   vi.restoreAllMocks()
 })
 
@@ -57,6 +64,9 @@ describe('BaseClient constructor', () => {
       8085
     )
     expect(Wreck.request.mock.calls[0][2].baseUrl).toBe('http://localhost:8085')
+    expect(mocks.CircuitBreaker).toHaveBeenCalledWith({
+      name: 'lis-be4fe-cattle-home'
+    })
   })
 })
 
@@ -201,6 +211,8 @@ describe('configured timeout with an upstream server', () => {
     // Assert
     expect(res.statusCode).toBe(200)
     expect(payload).toEqual({ data: [] })
+    expect(mocks.recordSuccess).toHaveBeenCalledTimes(1)
+    expect(mocks.recordFailure).not.toHaveBeenCalled()
   })
 
   test('it times out waiting for response headers using the configured timeout', async () => {
@@ -215,6 +227,8 @@ describe('configured timeout with an upstream server', () => {
       message: 'Request failed - 504',
       statusCode: 504
     })
+    expect(mocks.recordFailure).toHaveBeenCalledTimes(1)
+    expect(mocks.recordSuccess).not.toHaveBeenCalled()
   }, 1000)
 
   test('it times out reading the response body using the configured timeout', async () => {
@@ -229,9 +243,37 @@ describe('configured timeout with an upstream server', () => {
 
     // Act / Assert
     await expect(client._get('api/cattle')).rejects.toMatchObject({
-      message: 'Request failed - 200',
-      statusCode: 200
+      message: 'Request failed - 504',
+      statusCode: 504
     })
+    expect(mocks.recordFailure).toHaveBeenCalledTimes(1)
+    expect(mocks.recordSuccess).not.toHaveBeenCalled()
+  }, 1000)
+
+  test('it gives the body read only what is left of the timeout', async () => {
+    // Arrange
+    const client = createClient({ timeout: 200 })
+    server.on('request', (_request, response) => {
+      setTimeout(() => {
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.flushHeaders()
+        response.write('{"data":')
+        // Leave the body unfinished so that its read times out.
+      }, 120)
+    })
+    const startedAt = Date.now()
+
+    // Act
+    let error
+    try {
+      await client._get('api/cattle')
+    } catch (e) {
+      error = e
+    }
+
+    // Assert
+    expect(error.statusCode).toBe(504)
+    expect(Date.now() - startedAt).toBeLessThan(300)
   }, 1000)
 })
 
@@ -329,6 +371,8 @@ describe('service token', () => {
     )
     expect(error.cause.message).toBe('sts down')
     expect(request).not.toHaveBeenCalled()
+    expect(mocks.assertCallAllowed).not.toHaveBeenCalled()
+    expect(mocks.recordFailure).not.toHaveBeenCalled()
   })
 
   test('it ignores a caller-supplied baseUrl', async () => {
@@ -392,6 +436,8 @@ describe('error handling', () => {
     expect(error).toBeInstanceOf(Error)
     expect(error.message).toBe('not_found - CPH not found')
     expect(error.statusCode).toBe(404)
+    expect(mocks.recordSuccess).toHaveBeenCalledTimes(1)
+    expect(mocks.recordFailure).not.toHaveBeenCalled()
   })
 
   test('it throws using the ProblemDetails payload when the response is non-2xx', async () => {
@@ -490,6 +536,8 @@ describe('error handling', () => {
       path: 'api/users/user-1/cphs'
     })
     expect(error.cause).toBe(wreckError)
+    expect(mocks.recordFailure).toHaveBeenCalledTimes(1)
+    expect(mocks.recordSuccess).not.toHaveBeenCalled()
   })
 
   test('it throws when the response body cannot be read', async () => {
@@ -517,5 +565,79 @@ describe('error handling', () => {
       path: 'api/users/user-1/cphs'
     })
     expect(error.cause).toBe(readError)
+    expect(mocks.recordSuccess).toHaveBeenCalledTimes(1)
+    expect(mocks.recordFailure).not.toHaveBeenCalled()
+  })
+})
+
+describe('circuit breaker', () => {
+  test('it is configured with the given settings', () => {
+    // Act
+    createClient({ circuitBreaker: { failureThreshold: 2, resetTimeout: 100 } })
+
+    // Assert
+    expect(mocks.CircuitBreaker).toHaveBeenCalledWith({
+      name: 'lis-be4fe-cattle-home',
+      failureThreshold: 2,
+      resetTimeout: 100
+    })
+  })
+
+  test('it is consulted after the token fetch and immediately before the request', async () => {
+    // Arrange
+    const client = createClient()
+    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
+    vi.spyOn(Wreck, 'read').mockResolvedValue({})
+
+    // Act
+    await client._get('api/cattle')
+
+    // Assert
+    expect(mocks.assertCallAllowed).toHaveBeenCalledTimes(1)
+    expect(mocks.getServiceToken.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.assertCallAllowed.mock.invocationCallOrder[0]
+    )
+    expect(mocks.assertCallAllowed.mock.invocationCallOrder[0]).toBeLessThan(
+      Wreck.request.mock.invocationCallOrder[0]
+    )
+  })
+
+  test('it fails the call without calling the service when it refuses', async () => {
+    // Arrange
+    const client = createClient()
+    const openError = new Error('Circuit open for lis-be4fe-cattle-home')
+    mocks.assertCallAllowed.mockImplementationOnce(() => {
+      throw openError
+    })
+    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
+
+    // Act
+    let error
+    try {
+      await client._get('api/cattle')
+    } catch (e) {
+      error = e
+    }
+
+    // Assert
+    expect(error).toBe(openError)
+    expect(Wreck.request).not.toHaveBeenCalled()
+    expect(mocks.recordSuccess).not.toHaveBeenCalled()
+    expect(mocks.recordFailure).not.toHaveBeenCalled()
+  })
+
+  test('it is not created when disabled, and the call is unguarded', async () => {
+    // Arrange
+    const client = createClient({ circuitBreaker: false })
+    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
+    vi.spyOn(Wreck, 'read').mockResolvedValue({})
+
+    // Act
+    await client._get('api/cattle')
+
+    // Assert
+    expect(mocks.CircuitBreaker).not.toHaveBeenCalled()
+    expect(mocks.assertCallAllowed).not.toHaveBeenCalled()
+    expect(Wreck.request).toHaveBeenCalledTimes(1)
   })
 })
