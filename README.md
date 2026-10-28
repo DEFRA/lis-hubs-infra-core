@@ -163,13 +163,14 @@ import { CircuitBreaker } from '@defra/lis-hubs-infra-core'
 
 const breaker = new CircuitBreaker({ name: 'lis-be4fe-cattle-home' })
 
-// Either wrap the transport call only, so a response is never counted as a failure
-const res = await breaker.execute(() => Wreck.request('GET', url, options))
-
-// or drive it by hand
-breaker.assertCallAllowed() // throws CircuitOpenError while open
-breaker.recordSuccess()
-breaker.recordFailure()
+breaker.assertCallAllowed() // throws CircuitOpenError while open; call immediately before the transport call
+try {
+  res = await Wreck.request('GET', url, options)
+} catch (error) {
+  breaker.recordFailure() // no response at all
+  throw error
+}
+breaker.recordSuccess() // any response, whatever its status
 ```
 
 ### Environment variables

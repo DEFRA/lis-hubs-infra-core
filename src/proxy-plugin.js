@@ -2,6 +2,7 @@ import h2o2 from '@hapi/h2o2'
 
 import { getModulesForHub } from '@defra/lis-hubs-infra-registry'
 import { Spoke } from './spoke.js'
+import { positiveInteger } from './positive-integer.js'
 
 const DEFAULT_PROXY_TIMEOUT_MS = 30000
 
@@ -26,9 +27,6 @@ export function createProxyPlugin({
   if (!hubJwtCookieName) {
     throw new Error('hubJwtCookieName is required')
   }
-  if (!Number.isInteger(proxyTimeout) || proxyTimeout < 1) {
-    throw new Error('proxyTimeout must be a positive integer')
-  }
   if (circuitBreaker === null || typeof circuitBreaker !== 'object') {
     throw new Error('circuitBreaker must be an object of settings')
   }
@@ -40,6 +38,7 @@ export function createProxyPlugin({
   }
 
   const cookieNames = [hubJwtCookieName, ...forwardedCookieNames]
+  const timeout = positiveInteger('proxyTimeout', proxyTimeout)
 
   // Longest path first, so a shorter prefix does not swallow a longer one.
   const spokes = getModulesForHub(hubId)
@@ -51,7 +50,7 @@ export function createProxyPlugin({
           path,
           port,
           environment,
-          timeout: proxyTimeout,
+          timeout,
           cookieNames,
           circuitBreaker
         })

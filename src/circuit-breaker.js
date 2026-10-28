@@ -1,6 +1,7 @@
 import Boom from '@hapi/boom'
 
 import { logger } from './logging/index.js'
+import { positiveInteger } from './positive-integer.js'
 
 const SERVICE_UNAVAILABLE = 503
 const GENERIC_ERROR_MESSAGE = 'An internal server error occurred'
@@ -30,16 +31,6 @@ export class CircuitOpenError extends Error {
     super(message)
     Boom.boomify(this, { statusCode: SERVICE_UNAVAILABLE })
     this.output.payload.message = GENERIC_ERROR_MESSAGE
-  }
-}
-
-/**
- * @param {string} name
- * @param {number} value
- */
-function assertPositiveInteger(name, value) {
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`${name} must be a positive integer`)
   }
 }
 
@@ -76,11 +67,12 @@ export class CircuitBreaker {
     if (!name) {
       throw new Error('name is required')
     }
-    assertPositiveInteger('failureThreshold', failureThreshold)
-    assertPositiveInteger('resetTimeout', resetTimeout)
     this.#name = name
-    this.#failureThreshold = failureThreshold
-    this.#resetTimeout = resetTimeout
+    this.#failureThreshold = positiveInteger(
+      'failureThreshold',
+      failureThreshold
+    )
+    this.#resetTimeout = positiveInteger('resetTimeout', resetTimeout)
     this.#now = now
   }
 
@@ -157,27 +149,6 @@ export class CircuitBreaker {
     ) {
       this.#open()
     }
-  }
-
-  /**
-   * Run a call under the breaker. Every rejection counts as a failure, so
-   * only wrap the transport call, not anything that inspects the response.
-   *
-   * @template T
-   * @param {() => Promise<T>} call
-   * @returns {Promise<T>}
-   */
-  async execute(call) {
-    this.assertCallAllowed()
-    let result
-    try {
-      result = await call()
-    } catch (error) {
-      this.recordFailure()
-      throw error
-    }
-    this.recordSuccess()
-    return result
   }
 
   #open() {
