@@ -440,19 +440,15 @@ describe('createProxyPlugin()', () => {
     })
   })
 
-  test('rejects an unsupported environment', async () => {
-    // Arrange
-    const server = { route: vi.fn(), register: vi.fn() }
-    const proxy = createProxyPlugin({
-      hubId: 'back-office',
-      environment: 'unknown',
-      hubJwtCookieName: 'livestock_hub_jwt'
-    })
-
+  test('rejects an unsupported environment', () => {
     // Act
     let error
     try {
-      await proxy.plugin.register(server)
+      createProxyPlugin({
+        hubId: 'back-office',
+        environment: 'unknown',
+        hubJwtCookieName: 'livestock_hub_jwt'
+      })
     } catch (e) {
       error = e
     }

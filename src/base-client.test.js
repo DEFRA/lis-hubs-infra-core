@@ -38,6 +38,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 describe('BaseClient constructor', () => {
@@ -229,9 +230,35 @@ describe('configured timeout with an upstream server', () => {
 
     // Act / Assert
     await expect(client._get('api/cattle')).rejects.toMatchObject({
-      message: 'Request failed - 200',
-      statusCode: 200
+      message: 'Request failed - 504',
+      statusCode: 504
     })
+  }, 1000)
+
+  test('it gives the body read only what is left of the timeout', async () => {
+    // Arrange
+    const client = createClient({ timeout: 200 })
+    server.on('request', (_request, response) => {
+      setTimeout(() => {
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.flushHeaders()
+        response.write('{"data":')
+        // Leave the body unfinished so that its read times out.
+      }, 120)
+    })
+    const startedAt = Date.now()
+
+    // Act
+    let error
+    try {
+      await client._get('api/cattle')
+    } catch (e) {
+      error = e
+    }
+
+    // Assert
+    expect(error.statusCode).toBe(504)
+    expect(Date.now() - startedAt).toBeLessThan(300)
   }, 1000)
 })
 

@@ -78,7 +78,10 @@ Extend `BaseClient` to call another LIS service (for example a spoke's be4fe). I
 - adds an `Authorization: Bearer` service token from AWS STS (`GetWebIdentityToken`), with the
   target service's name as the audience
 - sends `x-api-key` if you give it an `apiKey`
-- times out after 3 seconds by default
+- times out after 3 seconds by default (`timeout`, in milliseconds, is the total budget for the
+  response headers and body; a timeout is thrown as a 504)
+- holds a [circuit breaker](#circuit-breaker) for the service (`circuitBreaker` sets its
+  `failureThreshold` and `resetTimeout`, or `false` disables it)
 
 ```js
 import { BaseClient } from '@defra/lis-hubs-infra-core'
@@ -102,7 +105,8 @@ class CattleHomeBe4FeClient extends BaseClient {
 
 `_get`, `_post`, `_put`, `_patch` and `_delete` take a path and
 [Wreck](https://hapi.dev/module/wreck/) options. If a service token can't be obtained, they throw
-`ServiceTokenError`. Other thrown errors carry `statusCode`, `serviceName`, `method`, `path` and `cause`
+`ServiceTokenError`; while the service's circuit is open, `CircuitOpenError`. Both carry a
+`statusCode` of 503. Other thrown errors carry `statusCode`, `serviceName`, `method`, `path` and `cause`
 for code that catches the error. The shared logger emits only the error's type, message and stack,
 so a caller that wants them in a log line must put them in the message or `logger.context`.
 
@@ -125,10 +129,45 @@ const proxy = createProxyPlugin({
   hubId: 'front-office',
   environment: config.get('environment'),
   hubJwtCookieName: config.get('auth.hubJwt.cookieName'),
-  forwardedCookieNames: [COOKIES_POLICY_COOKIE_NAME] // optional, none by default
+  forwardedCookieNames: [COOKIES_POLICY_COOKIE_NAME], // optional, none by default
+  proxyTimeout: 30000, // optional, milliseconds to wait for a spoke's response headers; 30s by default
+  circuitBreaker: { failureThreshold: 5, resetTimeout: 30000 } // optional, see below for the defaults
 })
 
 await server.register(proxy.plugin)
+```
+
+Each module is a `Spoke`, which owns the module's service name, base URL and
+[circuit breaker](#circuit-breaker) and builds the h2o2 route. A spoke that does not answer within
+`proxyTimeout` gets a 504; one that cannot be reached, a 502.
+
+### Circuit breaker
+
+`CircuitBreaker` protects calls to one downstream service, and is what `BaseClient` and the hub
+proxy use. Only a transport failure (connection refused, timeout) counts against it; any response,
+whatever its status, proves the service is up. Outcomes of calls that started before the circuit
+opened are ignored.
+
+- Closed: calls go through. `failureThreshold` consecutive failures (5 by default) open it.
+- Open: calls fail fast with `CircuitOpenError`, a 503, for `resetTimeout` milliseconds (30
+  seconds by default). The UI catch-all renders the "service unavailable, try again later" page.
+- Half-open: one probe call goes through and the rest fail fast. Its success closes the circuit;
+  its failure reopens it for another `resetTimeout`.
+
+The state is per process, so each hub or spoke instance decides for itself.
+
+```js
+import { CircuitBreaker } from '@defra/lis-hubs-infra-core'
+
+const breaker = new CircuitBreaker({ name: 'lis-be4fe-cattle-home' })
+
+// Either wrap the transport call only, so a response is never counted as a failure
+const res = await breaker.execute(() => Wreck.request('GET', url, options))
+
+// or drive it by hand
+breaker.assertCallAllowed() // throws CircuitOpenError while open
+breaker.recordSuccess()
+breaker.recordFailure()
 ```
 
 ### Environment variables
