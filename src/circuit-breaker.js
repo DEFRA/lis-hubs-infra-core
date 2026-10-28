@@ -1,5 +1,7 @@
 import Boom from '@hapi/boom'
 
+import { logger } from './logging/index.js'
+
 const SERVICE_UNAVAILABLE = 503
 const GENERIC_ERROR_MESSAGE = 'An internal server error occurred'
 const DEFAULT_FAILURE_THRESHOLD = 5
@@ -95,6 +97,9 @@ export class CircuitBreaker {
     ) {
       this.#state = CIRCUIT_STATES.HALF_OPEN
       this.#probeInFlight = false
+      logger.info(
+        `Circuit half-open for ${this.#name}; letting one probe call through`
+      )
     }
     return this.#state
   }
@@ -123,8 +128,12 @@ export class CircuitBreaker {
    * before the circuit opened is ignored: only the probe may close it.
    */
   recordSuccess() {
-    if (this.state === CIRCUIT_STATES.OPEN) {
+    const state = this.state
+    if (state === CIRCUIT_STATES.OPEN) {
       return
+    }
+    if (state === CIRCUIT_STATES.HALF_OPEN) {
+      logger.info(`Circuit closed for ${this.#name}; the probe call succeeded`)
     }
     this.#state = CIRCUIT_STATES.CLOSED
     this.#consecutiveFailures = 0
@@ -172,8 +181,15 @@ export class CircuitBreaker {
   }
 
   #open() {
+    const reason =
+      this.#state === CIRCUIT_STATES.HALF_OPEN
+        ? 'the probe call failed'
+        : `${this.#consecutiveFailures} consecutive transport failures`
     this.#state = CIRCUIT_STATES.OPEN
     this.#openedAt = this.#now()
     this.#probeInFlight = false
+    logger.warn(
+      `Circuit opened for ${this.#name} after ${reason}; failing fast for ${this.#resetTimeout}ms`
+    )
   }
 }

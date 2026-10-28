@@ -1,10 +1,23 @@
-import { describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { logger } from './logging/index.js'
 import {
   CIRCUIT_STATES,
   CircuitBreaker,
   CircuitOpenError
 } from './circuit-breaker.js'
+
+const logs = { warn: vi.fn(), info: vi.fn() }
+
+beforeEach(() => {
+  vi.spyOn(logger, 'warn', 'get').mockReturnValue(logs.warn)
+  vi.spyOn(logger, 'info', 'get').mockReturnValue(logs.info)
+})
+
+afterEach(() => {
+  vi.clearAllMocks()
+  vi.restoreAllMocks()
+})
 
 function createBreaker(options = {}) {
   const clock = { time: 1000 }
@@ -92,7 +105,7 @@ describe('closed circuit', () => {
     expect(breaker.state).toBe(CIRCUIT_STATES.CLOSED)
   })
 
-  test('it opens after consecutive failures reach the threshold', () => {
+  test('it opens, with a warning, after consecutive failures reach the threshold', () => {
     // Arrange
     const { breaker } = createBreaker()
 
@@ -103,6 +116,23 @@ describe('closed circuit', () => {
 
     // Assert
     expect(breaker.state).toBe(CIRCUIT_STATES.OPEN)
+    expect(logs.warn).toHaveBeenCalledTimes(1)
+    expect(logs.warn).toHaveBeenCalledWith(
+      'Circuit opened for lis-apps-cattle-home after 3 consecutive transport failures; failing fast for 500ms'
+    )
+  })
+
+  test('it logs nothing below the failure threshold', () => {
+    // Arrange
+    const { breaker } = createBreaker()
+
+    // Act
+    breaker.recordFailure()
+    breaker.recordSuccess()
+
+    // Assert
+    expect(logs.warn).not.toHaveBeenCalled()
+    expect(logs.info).not.toHaveBeenCalled()
   })
 })
 
@@ -173,16 +203,23 @@ describe('open circuit', () => {
     expect(breaker.state).toBe(CIRCUIT_STATES.OPEN)
   })
 
-  test('it goes half-open once the reset timeout has passed', () => {
+  test('it goes half-open, logging once, when the reset timeout has passed', () => {
     // Arrange
     const { breaker, clock } = createBreaker({ failureThreshold: 1 })
     breaker.recordFailure()
 
     // Act
     clock.time += 500
+    const first = breaker.state
+    const second = breaker.state
 
     // Assert
-    expect(breaker.state).toBe(CIRCUIT_STATES.HALF_OPEN)
+    expect(first).toBe(CIRCUIT_STATES.HALF_OPEN)
+    expect(second).toBe(CIRCUIT_STATES.HALF_OPEN)
+    expect(logs.info).toHaveBeenCalledTimes(1)
+    expect(logs.info).toHaveBeenCalledWith(
+      'Circuit half-open for lis-apps-cattle-home; letting one probe call through'
+    )
   })
 })
 
@@ -224,6 +261,9 @@ describe('half-open circuit', () => {
     // Assert
     expect(breaker.state).toBe(CIRCUIT_STATES.CLOSED)
     expect(() => breaker.assertCallAllowed()).not.toThrow()
+    expect(logs.info).toHaveBeenLastCalledWith(
+      'Circuit closed for lis-apps-cattle-home; the probe call succeeded'
+    )
   })
 
   test('it reopens for another reset timeout when the probe fails', () => {
@@ -236,6 +276,9 @@ describe('half-open circuit', () => {
 
     // Assert
     expect(breaker.state).toBe(CIRCUIT_STATES.OPEN)
+    expect(logs.warn).toHaveBeenLastCalledWith(
+      'Circuit opened for lis-apps-cattle-home after the probe call failed; failing fast for 500ms'
+    )
     clock.time += 499
     expect(breaker.state).toBe(CIRCUIT_STATES.OPEN)
     clock.time += 1

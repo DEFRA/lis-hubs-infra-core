@@ -154,7 +154,9 @@ opened are ignored.
 - Half-open: one probe call goes through and the rest fail fast. Its success closes the circuit;
   its failure reopens it for another `resetTimeout`.
 
-The state is per process, so each hub or spoke instance decides for itself.
+The state is per process, so each hub or spoke instance decides for itself. Every transition is
+logged through the shared logger: a warning when a circuit opens, info when it goes half-open and
+when the probe closes it.
 
 ```js
 import { CircuitBreaker } from '@defra/lis-hubs-infra-core'
