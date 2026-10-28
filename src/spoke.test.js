@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import Boom from '@hapi/boom'
 
 import { getServiceToken } from './service-token/issuer.js'
+import { logger } from './logging/index.js'
 import { CircuitBreaker } from './circuit-breaker.js'
 import { ServiceTokenError } from './base-client.js'
 import { Spoke } from './spoke.js'
@@ -29,11 +30,12 @@ function createSpoke(options = {}) {
   })
 }
 
-function createRequest() {
+function createRequest({ path = 'animals', search = '', headers = {} } = {}) {
+  const subPath = path ? `/${path}` : ''
   return {
-    params: { path: 'animals' },
-    url: new URL('http://hub.test/cattle/animals'),
-    headers: { cookie: 'livestock_hub_jwt=hub.jwt.value' }
+    params: path ? { path } : {},
+    url: new URL(`http://hub.test/cattle${subPath}${search}`),
+    headers
   }
 }
 
@@ -53,6 +55,7 @@ describe('Spoke', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
+    vi.restoreAllMocks()
   })
 
   test('it names the service after the module', () => {
@@ -62,6 +65,19 @@ describe('Spoke', () => {
     // Assert
     expect(spoke.serviceName).toBe('lis-apps-cattle-home')
     expect(spoke.path).toBe('/cattle')
+  })
+
+  test('it rejects an unsupported environment', () => {
+    // Act
+    let error
+    try {
+      createSpoke({ environment: 'unknown' })
+    } catch (e) {
+      error = e
+    }
+
+    // Assert
+    expect(error.message).toBe('Unsupported environment: unknown')
   })
 
   test('it holds a breaker named after the service, with the given settings', () => {
@@ -92,22 +108,145 @@ describe('Spoke', () => {
   })
 
   describe('mapUri()', () => {
+    test.each([
+      // Local proxying intentionally uses HTTP because the services run locally.
+      ['local', 'http://localhost:3222'],
+      // docker_compose reaches every service via the host's published ports -
+      // there's no reliable compose service-name discovery to lean on instead.
+      ['docker_compose', 'http://host.docker.internal:3222'],
+      ['test', 'https://lis-apps-cattle-home.test.cdp-int.defra.cloud'],
+      ['prod', 'https://lis-apps-cattle-home.prod.cdp-int.defra.cloud']
+    ])('it targets the %s spoke', async (environment, expectedBaseUri) => {
+      // Arrange
+      const spoke = createSpoke({ environment })
+
+      // Act
+      const withPath = await spoke.mapUri(
+        createRequest({ path: 'summary-data' })
+      )
+      const withoutPath = await spoke.mapUri(createRequest({ path: '' }))
+
+      // Assert
+      expect(withPath.uri).toBe(`${expectedBaseUri}/summary-data`)
+      expect(withoutPath.uri).toBe(expectedBaseUri)
+    })
+
+    test('it forwards the incoming query string', async () => {
+      // Arrange
+      const spoke = createSpoke()
+
+      // Act
+      const mapped = await spoke.mapUri(
+        createRequest({ search: '?sort=sex&direction=asc&page=1' })
+      )
+
+      // Assert
+      expect(mapped.uri).toBe(
+        'http://localhost:3222/animals?sort=sex&direction=asc&page=1'
+      )
+    })
+
+    test('it sends a service token for the spoke in place of the inbound authorization, which passThrough must not see', async () => {
+      // Arrange
+      const spoke = createSpoke()
+      const request = createRequest({
+        headers: { authorization: 'Bearer browser-token', accept: 'text/html' }
+      })
+
+      // Act
+      const mapped = await spoke.route.handler.proxy.mapUri(request)
+
+      // Assert
+      expect(mocks.getServiceToken).toHaveBeenCalledWith('lis-apps-cattle-home')
+      expect(mapped.headers).toEqual({
+        'x-forwarded-prefix': '/cattle',
+        authorization: 'Bearer service-token'
+      })
+      expect(request.headers).toEqual({ accept: 'text/html' })
+    })
+
+    test('it forwards only the hub JWT cookie', async () => {
+      // Arrange
+      const spoke = createSpoke()
+      const request = createRequest({
+        headers: {
+          cookie:
+            'front-office-session=abc; livestock_hub_jwt=hub.jwt.value; other=1'
+        }
+      })
+
+      // Act
+      const mapped = await spoke.mapUri(request)
+
+      // Assert
+      expect(mapped.headers.cookie).toBe('livestock_hub_jwt=hub.jwt.value')
+      expect(request.headers).toEqual({})
+    })
+
+    test('it forwards the named cookies alongside the hub JWT, in the browser order', async () => {
+      // Arrange
+      const spoke = createSpoke({
+        cookieNames: ['livestock_hub_jwt', 'cookies_policy']
+      })
+      const request = createRequest({
+        headers: {
+          cookie:
+            'cookies_policy=%7B%22analytics%22%3Afalse%7D; front-office-session=abc; livestock_hub_jwt=hub.jwt.value'
+        }
+      })
+
+      // Act
+      const mapped = await spoke.mapUri(request)
+
+      // Assert
+      expect(mapped.headers.cookie).toBe(
+        'cookies_policy=%7B%22analytics%22%3Afalse%7D; livestock_hub_jwt=hub.jwt.value'
+      )
+      expect(request.headers).toEqual({})
+    })
+
+    test('it forwards a named cookie on its own when there is no hub JWT cookie', async () => {
+      // Arrange
+      const spoke = createSpoke({
+        cookieNames: ['livestock_hub_jwt', 'cookies_policy']
+      })
+      const request = createRequest({
+        headers: { cookie: 'front-office-session=abc; cookies_policy=x' }
+      })
+
+      // Act
+      const mapped = await spoke.mapUri(request)
+
+      // Assert
+      expect(mapped.headers.cookie).toBe('cookies_policy=x')
+    })
+
+    test('it sends no cookie when none of the named cookies are present', async () => {
+      // Arrange
+      const spoke = createSpoke()
+      const request = createRequest({
+        headers: { cookie: 'front-office-session=abc' }
+      })
+
+      // Act
+      const mapped = await spoke.mapUri(request)
+
+      // Assert
+      expect(mapped.headers).toEqual({
+        'x-forwarded-prefix': '/cattle',
+        authorization: 'Bearer service-token'
+      })
+      expect(request.headers).toEqual({})
+    })
+
     test('it consults the breaker after the token fetch', async () => {
       // Arrange
       const spoke = createSpoke()
 
       // Act
-      const mapped = await spoke.route.handler.proxy.mapUri(createRequest())
+      await spoke.mapUri(createRequest())
 
       // Assert
-      expect(mapped).toEqual({
-        uri: 'http://localhost:3222/animals',
-        headers: {
-          'x-forwarded-prefix': '/cattle',
-          authorization: 'Bearer service-token',
-          cookie: 'livestock_hub_jwt=hub.jwt.value'
-        }
-      })
       expect(mocks.assertCallAllowed).toHaveBeenCalledTimes(1)
       expect(mocks.getServiceToken.mock.invocationCallOrder[0]).toBeLessThan(
         mocks.assertCallAllowed.mock.invocationCallOrder[0]
@@ -134,11 +273,13 @@ describe('Spoke', () => {
       expect(error).toBe(openError)
     })
 
-    test('it does not consult the breaker when the service token fails', async () => {
+    test('it rejects with an error naming the spoke, without consulting the breaker or logging, when the service token cannot be obtained', async () => {
       // Arrange
       const spoke = createSpoke()
       const stsError = new Error('sts down')
       mocks.getServiceToken.mockRejectedValueOnce(stsError)
+      const errorSpy = vi.fn()
+      vi.spyOn(logger, 'error', 'get').mockReturnValue(errorSpy)
 
       // Act
       let error
@@ -153,30 +294,66 @@ describe('Spoke', () => {
       expect(error.message).toBe(
         'Service token unavailable for spoke lis-apps-cattle-home'
       )
+      expect(error.statusCode).toBe(503)
       expect(error.cause).toBe(stsError)
       expect(mocks.assertCallAllowed).not.toHaveBeenCalled()
+      expect(errorSpy).not.toHaveBeenCalled()
     })
   })
 
   describe('onResponse()', () => {
     test.each([
-      ['connection failure', 502],
-      ['timeout', 504],
-      ['failure without a status', undefined]
-    ])('it records a failure on a %s', (_, statusCode) => {
+      [502, 'Bad Gateway'],
+      [504, 'Gateway Time-out']
+    ])(
+      'it turns a failed spoke request into a %i Boom error naming the spoke, with a generic body and without logging, and records a failure',
+      (statusCode, errorName) => {
+        // Arrange
+        const spoke = createSpoke()
+        const errorSpy = vi.fn()
+        vi.spyOn(logger, 'error', 'get').mockReturnValue(errorSpy)
+        const upstreamError = Boom.boomify(new Error('Client request error'), {
+          statusCode
+        })
+
+        // Act
+        const result = spoke.route.handler.proxy.onResponse(
+          upstreamError,
+          undefined,
+          { method: 'get', path: '/cattle/animals' },
+          {}
+        )
+
+        // Assert
+        expect(Boom.isBoom(result)).toBe(true)
+        expect(result.output.statusCode).toBe(statusCode)
+        expect(result.message).toBe(
+          'Spoke lis-apps-cattle-home request failed: Client request error'
+        )
+        expect(result.cause).toBe(upstreamError)
+        expect(result.output.payload).toEqual({
+          statusCode,
+          error: errorName,
+          message: 'An internal server error occurred'
+        })
+        expect(errorSpy).not.toHaveBeenCalled()
+        expect(mocks.recordFailure).toHaveBeenCalledTimes(1)
+        expect(mocks.recordSuccess).not.toHaveBeenCalled()
+      }
+    )
+
+    test('it defaults a failed spoke request without a status to 502 and records a failure', () => {
       // Arrange
       const spoke = createSpoke()
-      const upstreamError = statusCode
-        ? Boom.boomify(new Error('Client request error'), { statusCode })
-        : new Error('socket hang up')
+      const upstreamError = new Error('socket hang up')
 
       // Act
       const result = spoke.onResponse(upstreamError, undefined, {}, {})
 
       // Assert
-      expect(result.output.statusCode).toBe(statusCode ?? 502)
+      expect(result.output.statusCode).toBe(502)
+      expect(result.cause).toBe(upstreamError)
       expect(mocks.recordFailure).toHaveBeenCalledTimes(1)
-      expect(mocks.recordSuccess).not.toHaveBeenCalled()
     })
 
     test('it records nothing on a failure on the browser side of the proxy', () => {
@@ -198,17 +375,25 @@ describe('Spoke', () => {
       expect(mocks.recordSuccess).not.toHaveBeenCalled()
     })
 
-    test.each([200, 404, 500])(
-      'it records a success on a %i response and passes it through',
+    test.each([200, 302, 404, 500])(
+      'it passes a %i response through and records a success',
       (statusCode) => {
         // Arrange
         const spoke = createSpoke()
         const h = createToolkit()
+        const response = { statusCode }
 
         // Act
-        const result = spoke.onResponse(null, { statusCode }, {}, h)
+        const result = spoke.onResponse(null, response, {}, h)
 
         // Assert
+        expect(h.response).toHaveBeenCalledWith(response)
+        expect(h.response.mock.results[0].value.code).toHaveBeenCalledWith(
+          statusCode
+        )
+        expect(
+          h.response.mock.results[0].value.passThrough
+        ).toHaveBeenCalledWith(true)
         expect(result).toBe('passed through')
         expect(mocks.recordSuccess).toHaveBeenCalledTimes(1)
         expect(mocks.recordFailure).not.toHaveBeenCalled()
