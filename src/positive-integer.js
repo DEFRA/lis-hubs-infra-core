@@ -1,6 +1,6 @@
 /**
  * @param {string} name the option's name, for the error
- * @param {unknown} value
+ * @param {number} value
  * @returns {number} value, when it is a positive integer
  * @throws {Error} naming the option otherwise
  */
