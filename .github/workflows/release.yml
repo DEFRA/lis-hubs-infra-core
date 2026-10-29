@@ -1,4 +1,3 @@
-#file: noinspection UndefinedParamsPresent,UndefinedAction
 name: 'Release'
 
 on:
@@ -17,7 +16,7 @@ jobs:
   get-version:
     name: 'Calculate Stable Version'
     if: github.event.pull_request.merged == true
-    uses: ./.github/workflows/support-version.yml
+    uses: DEFRA/lis-github-actions/.github/workflows/version.yml@0.1.0
     with:
       ref: ${{ github.event.pull_request.merge_commit_sha }}
       branch: ${{ github.event.pull_request.head.ref }}
@@ -26,7 +25,7 @@ jobs:
   validate:
     name: 'Validate Merged Commit'
     needs: get-version
-    uses: ./.github/workflows/support-validate.yml
+    uses: DEFRA/lis-github-actions/.github/workflows/npm-package-validate.yml@0.1.0
     with:
       version: ${{ needs.get-version.outputs.version }}
       ref: ${{ github.event.pull_request.merge_commit_sha }}
@@ -34,7 +33,7 @@ jobs:
   sonar-analysis:
     name: 'Sonar Analysis'
     needs: [get-version, validate]
-    uses: ./.github/workflows/support-sonar.yml
+    uses: DEFRA/lis-github-actions/.github/workflows/node-sonar.yml@0.1.0
     with:
       version: ${{ needs.get-version.outputs.version }}
       ref: ${{ github.event.pull_request.merge_commit_sha }}
@@ -45,7 +44,7 @@ jobs:
     name: 'Tag Main'
     needs: [get-version, validate, sonar-analysis]
     if: needs.sonar-analysis.outputs.quality-gate-status == 'PASSED'
-    uses: ./.github/workflows/support-tag.yml
+    uses: DEFRA/lis-github-actions/.github/workflows/tag.yml@0.1.0
     with:
       version: ${{ needs.get-version.outputs.version }}
       ref: ${{ github.event.pull_request.merge_commit_sha }}
