@@ -16,5 +16,5 @@ permissions:
 jobs:
   publish:
     name: 'Publish'
-    uses: DEFRA/lis-github-actions/.github/workflows/npm-package-publish.yml@4d8ee41d6d27ad713d53a2a924b37fc06ff368dd
+    uses: DEFRA/lis-github-actions/.github/workflows/npm-package-publish.yml@v0
     secrets: inherit

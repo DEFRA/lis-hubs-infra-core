@@ -15,7 +15,7 @@ permissions:
 jobs:
   get-version:
     name: 'Calculate Prospective Version'
-    uses: DEFRA/lis-github-actions/.github/workflows/version.yml@4d8ee41d6d27ad713d53a2a924b37fc06ff368dd
+    uses: DEFRA/lis-github-actions/.github/workflows/version.yml@v0
     with:
       ref: ${{ github.event.pull_request.head.sha }}
       branch: ${{ github.event.pull_request.head.ref }}
@@ -24,7 +24,7 @@ jobs:
   validate:
     name: 'Validate'
     needs: get-version
-    uses: DEFRA/lis-github-actions/.github/workflows/npm-package-validate.yml@4d8ee41d6d27ad713d53a2a924b37fc06ff368dd
+    uses: DEFRA/lis-github-actions/.github/workflows/npm-package-validate.yml@v0
     with:
       version: ${{ needs.get-version.outputs.version }}
       ref: ${{ github.event.pull_request.head.sha }}
@@ -32,7 +32,7 @@ jobs:
   sonar-analysis:
     name: 'Sonar Analysis'
     needs: [get-version, validate]
-    uses: DEFRA/lis-github-actions/.github/workflows/node-sonar.yml@4d8ee41d6d27ad713d53a2a924b37fc06ff368dd
+    uses: DEFRA/lis-github-actions/.github/workflows/node-sonar.yml@v0
     with:
       version: ${{ needs.get-version.outputs.version }}
       ref: ${{ github.event.pull_request.head.sha }}

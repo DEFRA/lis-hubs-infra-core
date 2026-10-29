@@ -16,7 +16,7 @@ permissions:
 jobs:
   get-version:
     name: 'Calculate Version'
-    uses: DEFRA/lis-github-actions/.github/workflows/version.yml@4d8ee41d6d27ad713d53a2a924b37fc06ff368dd
+    uses: DEFRA/lis-github-actions/.github/workflows/version.yml@v0
     with:
       ref: ${{ github.sha }}
       branch: ${{ github.ref_name }}
@@ -25,7 +25,7 @@ jobs:
   validate:
     name: 'Validate'
     needs: get-version
-    uses: DEFRA/lis-github-actions/.github/workflows/npm-package-validate.yml@4d8ee41d6d27ad713d53a2a924b37fc06ff368dd
+    uses: DEFRA/lis-github-actions/.github/workflows/npm-package-validate.yml@v0
     with:
       version: ${{ needs.get-version.outputs.version }}
       ref: ${{ github.sha }}
@@ -33,7 +33,7 @@ jobs:
   sonar-analysis:
     name: 'Sonar Analysis'
     needs: [get-version, validate]
-    uses: DEFRA/lis-github-actions/.github/workflows/node-sonar.yml@4d8ee41d6d27ad713d53a2a924b37fc06ff368dd
+    uses: DEFRA/lis-github-actions/.github/workflows/node-sonar.yml@v0
     with:
       version: ${{ needs.get-version.outputs.version }}
       ref: ${{ github.sha }}
@@ -44,7 +44,7 @@ jobs:
     name: 'Tag Validated Commit'
     needs: [get-version, validate, sonar-analysis]
     if: needs.sonar-analysis.outputs.quality-gate-status == 'PASSED'
-    uses: DEFRA/lis-github-actions/.github/workflows/tag.yml@4d8ee41d6d27ad713d53a2a924b37fc06ff368dd
+    uses: DEFRA/lis-github-actions/.github/workflows/tag.yml@v0
     with:
       version: ${{ needs.get-version.outputs.version }}
       ref: ${{ github.sha }}
