@@ -31,7 +31,7 @@ jobs:
 
   sonar-analysis:
     name: 'Sonar Analysis'
-    needs: [get-version, validate]
+    needs: get-version
     uses: DEFRA/lis-github-actions/.github/workflows/node-sonar.yml@0.1.0
     with:
       version: ${{ needs.get-version.outputs.version }}
