@@ -40,21 +40,20 @@ export function createProxyPlugin({
   const cookieNames = [hubJwtCookieName, ...forwardedCookieNames]
   const timeout = positiveInteger('proxyTimeout', proxyTimeout)
 
-  // Longest path first, so a shorter prefix does not swallow a longer one.
-  const spokes = getModulesForHub(hubId)
-    .toSorted((a, b) => b.path.split('/').length - a.path.split('/').length)
-    .map(
-      ({ id: moduleName, path, port }) =>
-        new Spoke({
-          moduleName,
-          path,
-          port,
-          environment,
-          timeout,
-          cookieNames,
-          circuitBreaker
-        })
-    )
+  // One route per mount; hapi matches by specificity, so a verb spoke under
+  // a species home wins without any ordering here.
+  const spokes = getModulesForHub(hubId).map(
+    ({ id: moduleName, mounts, port }) =>
+      new Spoke({
+        moduleName,
+        mounts: Object.values(mounts),
+        port,
+        environment,
+        timeout,
+        cookieNames,
+        circuitBreaker
+      })
+  )
 
   return {
     plugin: {
@@ -62,7 +61,7 @@ export function createProxyPlugin({
       async register(server) {
         await server.register(h2o2)
         for (const spoke of spokes) {
-          server.route(spoke.route)
+          server.route(spoke.routes)
         }
       }
     }

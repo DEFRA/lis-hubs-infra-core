@@ -25,12 +25,23 @@ function createOptions(options = {}) {
 describe('createProxyPlugin()', () => {
   beforeEach(() => {
     mocks.getModulesForHub.mockReturnValue([
-      { id: 'cattle-home', path: '/cattle', port: 3222 }
+      {
+        id: 'cattle-home',
+        path: '/holdings/{cph*3}/cattle',
+        mounts: {
+          holding: '/holdings/{cph*3}/cattle',
+          animal: '/animals/cattle'
+        },
+        port: 3222
+      }
     ])
-    mocks.Spoke.mockImplementation(function ({ path }) {
-      // The automock keeps the real class's `route` getter on the prototype.
-      Object.defineProperty(this, 'route', {
-        value: { method: '*', path: `${path}/{path*}` }
+    mocks.Spoke.mockImplementation(function ({ mounts }) {
+      // The automock keeps the real class's `routes` getter on the prototype.
+      Object.defineProperty(this, 'routes', {
+        value: mounts.map((prefix) => ({
+          method: '*',
+          path: `${prefix}/{path*}`
+        }))
       })
     })
   })
@@ -111,7 +122,7 @@ describe('createProxyPlugin()', () => {
     expect(mocks.Spoke).toHaveBeenCalledTimes(1)
     expect(mocks.Spoke).toHaveBeenCalledWith({
       moduleName: 'cattle-home',
-      path: '/cattle',
+      mounts: ['/holdings/{cph*3}/cattle', '/animals/cattle'],
       port: 3222,
       environment: 'local',
       timeout: 30000,
@@ -134,7 +145,7 @@ describe('createProxyPlugin()', () => {
     // Assert
     expect(mocks.Spoke).toHaveBeenCalledWith({
       moduleName: 'cattle-home',
-      path: '/cattle',
+      mounts: ['/holdings/{cph*3}/cattle', '/animals/cattle'],
       port: 3222,
       environment: 'prod',
       timeout: 5000,
@@ -156,30 +167,7 @@ describe('createProxyPlugin()', () => {
     expect(server.register).toHaveBeenCalledWith(h2o2)
     expect(server.route).toHaveBeenCalledTimes(1)
     expect(server.route).toHaveBeenCalledWith(
-      mocks.Spoke.mock.instances[0].route
+      mocks.Spoke.mock.instances[0].routes
     )
-  })
-
-  test('sorts modules with the longest path first so a shorter prefix does not swallow a longer one', async () => {
-    // Arrange
-    mocks.getModulesForHub.mockReturnValue([
-      { id: 'cattle-home', path: '/cattle', port: 3221 },
-      { id: 'cattle-register', path: '/cattle/register', port: 3201 }
-    ])
-    const server = { route: vi.fn(), register: vi.fn() }
-    const proxy = createProxyPlugin(createOptions({ hubId: 'front-office' }))
-
-    // Act
-    await proxy.plugin.register(server)
-
-    // Assert
-    expect(mocks.getModulesForHub).toHaveBeenCalledWith('front-office')
-    expect(
-      mocks.Spoke.mock.calls.map(([{ moduleName }]) => moduleName)
-    ).toEqual(['cattle-register', 'cattle-home'])
-    expect(server.route.mock.calls.map(([{ path }]) => path)).toEqual([
-      '/cattle/register/{path*}',
-      '/cattle/{path*}'
-    ])
   })
 })

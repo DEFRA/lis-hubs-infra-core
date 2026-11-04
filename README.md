@@ -138,8 +138,13 @@ await server.register(proxy.plugin)
 ```
 
 Each module is a `Spoke`, which owns the module's service name, base URL and
-[circuit breaker](#circuit-breaker) and builds the h2o2 route. A spoke that does not answer within
+[circuit breaker](#circuit-breaker) and builds the h2o2 routes. A spoke that does not answer within
 `proxyTimeout` gets a 504; one that cannot be reached, a 502.
+
+A spoke gets one route per registry mount (`/holdings/{cph*3}/cattle/{path*}`,
+`/animals/cattle/{path*}`), under which the request path is forwarded unchanged, so the spoke
+registers the same full patterns and sees the URL the browser asked for. hapi matches routes by specificity, not registration order, so
+`/holdings/12/345/0001/cattle/register` reaches cattle-register, not cattle-home.
 
 ### Circuit breaker
 

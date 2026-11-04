@@ -21,7 +21,7 @@ const mocks = {
 function createSpoke(options = {}) {
   return new Spoke({
     moduleName: 'cattle-home',
-    path: '/cattle',
+    mounts: ['/holdings/{cph*3}/cattle', '/animals/cattle'],
     port: 3222,
     environment: 'local',
     timeout: 30000,
@@ -30,11 +30,18 @@ function createSpoke(options = {}) {
   })
 }
 
-function createRequest({ path = 'animals', search = '', headers = {} } = {}) {
+function createRequest({
+  path = 'animals',
+  search = '',
+  headers = {},
+  prefix = '/holdings/12/345/0001/cattle'
+} = {}) {
   const subPath = path ? `/${path}` : ''
+  const url = new URL(`http://hub.test${prefix}${subPath}${search}`)
   return {
     params: path ? { path } : {},
-    url: new URL(`http://hub.test/cattle${subPath}${search}`),
+    path: url.pathname,
+    url,
     headers
   }
 }
@@ -64,8 +71,27 @@ describe('Spoke', () => {
 
     // Assert
     expect(spoke.serviceName).toBe('lis-apps-cattle-home')
-    expect(spoke.path).toBe('/cattle')
+    expect(spoke.mounts).toEqual([
+      '/holdings/{cph*3}/cattle',
+      '/animals/cattle'
+    ])
   })
+
+  test.each([[[]], [undefined]])(
+    'it rejects a module whose mounts are %j',
+    (mounts) => {
+      // Act
+      let error
+      try {
+        createSpoke({ mounts })
+      } catch (e) {
+        error = e
+      }
+
+      // Assert
+      expect(error.message).toBe('Spoke cattle-home has no mounts')
+    }
+  )
 
   test('it rejects an unsupported environment', () => {
     // Act
@@ -92,22 +118,72 @@ describe('Spoke', () => {
     expect(spoke.circuitBreaker).toBe(mocks.CircuitBreaker.mock.instances[0])
   })
 
-  test('it proxies every method under its path with the timeout', () => {
+  test('it proxies every method under each mount with the timeout', () => {
     // Act
-    const { route } = createSpoke({ timeout: 5000 })
+    const { routes } = createSpoke({ timeout: 5000 })
 
     // Assert
-    expect(route).toMatchObject({ method: '*', path: '/cattle/{path*}' })
-    expect(route.handler.proxy).toMatchObject({
-      passThrough: true,
-      xforward: true,
-      timeout: 5000
-    })
-    expect(route.handler.proxy.mapUri).toBeTypeOf('function')
-    expect(route.handler.proxy.onResponse).toBeTypeOf('function')
+    expect(routes.map(({ method, path }) => ({ method, path }))).toEqual([
+      { method: '*', path: '/holdings/{cph*3}/cattle/{path*}' },
+      { method: '*', path: '/animals/cattle/{path*}' }
+    ])
+    for (const route of routes) {
+      expect(route.handler.proxy).toMatchObject({
+        passThrough: true,
+        xforward: true,
+        timeout: 5000
+      })
+      expect(route.handler.proxy.mapUri).toBeTypeOf('function')
+      expect(route.handler.proxy.onResponse).toBeTypeOf('function')
+    }
   })
 
   describe('mapUri()', () => {
+    test('it forwards the request path unchanged', async () => {
+      // Arrange
+      const spoke = createSpoke()
+      const request = createRequest({ path: 'animals', search: '?page=2' })
+
+      // Act
+      const mapped = await spoke.routes[0].handler.proxy.mapUri(request)
+
+      // Assert
+      expect(mapped.uri).toBe(
+        'http://localhost:3222/holdings/12/345/0001/cattle/animals?page=2'
+      )
+    })
+
+    test('it forwards the bare mount', async () => {
+      // Arrange
+      const spoke = createSpoke()
+      const request = createRequest({ path: '' })
+
+      // Act
+      const mapped = await spoke.routes[0].handler.proxy.mapUri(request)
+
+      // Assert
+      expect(mapped.uri).toBe(
+        'http://localhost:3222/holdings/12/345/0001/cattle'
+      )
+    })
+
+    test('it forwards a request under a mount without parameters', async () => {
+      // Arrange
+      const spoke = createSpoke()
+      const request = createRequest({
+        prefix: '/animals/cattle',
+        path: 'UK123456700001'
+      })
+
+      // Act
+      const mapped = await spoke.routes[1].handler.proxy.mapUri(request)
+
+      // Assert
+      expect(mapped.uri).toBe(
+        'http://localhost:3222/animals/cattle/UK123456700001'
+      )
+    })
+
     test.each([
       // Local proxying intentionally uses HTTP because the services run locally.
       ['local', 'http://localhost:3222'],
@@ -127,8 +203,12 @@ describe('Spoke', () => {
       const withoutPath = await spoke.mapUri(createRequest({ path: '' }))
 
       // Assert
-      expect(withPath.uri).toBe(`${expectedBaseUri}/summary-data`)
-      expect(withoutPath.uri).toBe(expectedBaseUri)
+      expect(withPath.uri).toBe(
+        `${expectedBaseUri}/holdings/12/345/0001/cattle/summary-data`
+      )
+      expect(withoutPath.uri).toBe(
+        `${expectedBaseUri}/holdings/12/345/0001/cattle`
+      )
     })
 
     test('it forwards the incoming query string', async () => {
@@ -142,7 +222,7 @@ describe('Spoke', () => {
 
       // Assert
       expect(mapped.uri).toBe(
-        'http://localhost:3222/animals?sort=sex&direction=asc&page=1'
+        'http://localhost:3222/holdings/12/345/0001/cattle/animals?sort=sex&direction=asc&page=1'
       )
     })
 
@@ -154,12 +234,11 @@ describe('Spoke', () => {
       })
 
       // Act
-      const mapped = await spoke.route.handler.proxy.mapUri(request)
+      const mapped = await spoke.routes[0].handler.proxy.mapUri(request)
 
       // Assert
       expect(mocks.getServiceToken).toHaveBeenCalledWith('lis-apps-cattle-home')
       expect(mapped.headers).toEqual({
-        'x-forwarded-prefix': '/cattle',
         authorization: 'Bearer service-token'
       })
       expect(request.headers).toEqual({ accept: 'text/html' })
@@ -233,7 +312,6 @@ describe('Spoke', () => {
 
       // Assert
       expect(mapped.headers).toEqual({
-        'x-forwarded-prefix': '/cattle',
         authorization: 'Bearer service-token'
       })
       expect(request.headers).toEqual({})
@@ -317,10 +395,10 @@ describe('Spoke', () => {
         })
 
         // Act
-        const result = spoke.route.handler.proxy.onResponse(
+        const result = spoke.routes[0].handler.proxy.onResponse(
           upstreamError,
           undefined,
-          { method: 'get', path: '/cattle/animals' },
+          { method: 'get', path: '/holdings/12/345/0001/cattle/animals' },
           {}
         )
 

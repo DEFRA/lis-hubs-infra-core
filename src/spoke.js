@@ -26,12 +26,16 @@ function pickCookies(cookieHeader, names) {
 }
 
 /**
- * A module's app as a hub sees it: where it is, the path it is mounted at,
- * its circuit breaker, and the h2o2 route that proxies to it.
+ * A module's app as a hub sees it: where it is, the mounts it is served at,
+ * its circuit breaker, and the h2o2 routes that proxy to it.
+ *
+ * A mount is a URL pattern from the registry, such as
+ * `/holdings/{cph*3}/cattle`. Requests under a mount are forwarded with their
+ * path unchanged, so the spoke registers the same full patterns.
  */
 export class Spoke {
   #serviceName
-  #path
+  #mounts
   #baseUri
   #timeout
   #cookieNames
@@ -40,7 +44,7 @@ export class Spoke {
   /**
    * @param {object} options
    * @param {string} options.moduleName - the module id from the registry
-   * @param {string} options.path - the hub path prefix the spoke is mounted at
+   * @param {string[]} options.mounts - the mount patterns the hub serves the spoke at
    * @param {number} options.port - the spoke's port, used for local environments only
    * @param {string} options.environment
    * @param {number} options.timeout - milliseconds to wait for the spoke's response headers before answering 504
@@ -49,15 +53,18 @@ export class Spoke {
    */
   constructor({
     moduleName,
-    path,
+    mounts,
     port,
     environment,
     timeout,
     cookieNames,
     circuitBreaker = {}
   }) {
+    if (!Array.isArray(mounts) || mounts.length === 0) {
+      throw new Error(`Spoke ${moduleName} has no mounts`)
+    }
     this.#serviceName = `lis-apps-${moduleName}`
-    this.#path = path
+    this.#mounts = mounts
     this.#baseUri = getServiceBaseUrl(
       environment,
       this.#serviceName,
@@ -76,9 +83,9 @@ export class Spoke {
     return this.#serviceName
   }
 
-  /** @returns {string} the hub path prefix the spoke is mounted at */
-  get path() {
-    return this.#path
+  /** @returns {string[]} the mount patterns the hub serves the spoke at */
+  get mounts() {
+    return this.#mounts
   }
 
   /** @returns {CircuitBreaker} */
@@ -87,12 +94,13 @@ export class Spoke {
   }
 
   /**
-   * @returns {object} a hapi route proxying `${path}/{path*}` to the spoke
+   * @returns {object[]} a hapi route proxying `${mount}/{path*}` to the
+   * spoke for each mount
    */
-  get route() {
-    return {
+  get routes() {
+    return this.#mounts.map((mount) => ({
       method: '*',
-      path: `${this.#path}/{path*}`,
+      path: `${mount}/{path*}`,
       handler: {
         proxy: {
           passThrough: true,
@@ -103,11 +111,14 @@ export class Spoke {
             this.onResponse(err, res, request, h)
         }
       }
-    }
+    }))
   }
 
   /**
    * h2o2 mapUri. Fails fast with a 503 while the spoke's circuit is open.
+   *
+   * The request path is forwarded unchanged, so the spoke sees the URL the
+   * browser asked for.
    *
    * @param {object} request the hub request
    * @returns {Promise<{ uri: string, headers: object }>}
@@ -119,10 +130,6 @@ export class Spoke {
     // Nothing may throw between here and h2o2 making the call, or a
     // half-open probe would never report back.
     this.#breaker.assertCallAllowed()
-    const subPath = request.params.path ?? ''
-    const uri =
-      (subPath ? `${this.#baseUri}/${subPath}` : this.#baseUri) +
-      request.url.search
 
     // passThrough copies request.headers itself and merges these headers on
     // top, so a header can only be withheld from the spoke by removing it
@@ -136,9 +143,8 @@ export class Spoke {
     delete request.headers.cookie
 
     return {
-      uri,
+      uri: `${this.#baseUri}${request.path}${request.url.search}`,
       headers: {
-        'x-forwarded-prefix': this.#path,
         authorization: `Bearer ${serviceToken}`,
         ...(forwardedCookies && { cookie: forwardedCookies })
       }
