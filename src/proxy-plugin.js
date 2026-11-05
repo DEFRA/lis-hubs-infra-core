@@ -25,7 +25,7 @@ export function createProxyPlugin({
   circuitBreaker = {}
 }) {
   if (typeof getUserToken !== 'function') {
-    throw new Error('createProxyPlugin requires a getUserToken function')
+    throw new TypeError('createProxyPlugin requires a getUserToken function')
   }
   if (circuitBreaker === null || typeof circuitBreaker !== 'object') {
     throw new Error('circuitBreaker must be an object of settings')
