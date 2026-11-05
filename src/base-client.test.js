@@ -43,6 +43,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.clearAllMocks()
   vi.restoreAllMocks()
 })
@@ -81,6 +82,9 @@ describe('request verbs', () => {
     'it sends %s requests via Wreck.request with the correlation and service token headers',
     async (method, httpMethod) => {
       // Arrange
+      // The body read gets what is left of the timeout, so the clock is frozen
+      // to keep a millisecond of elapsed time out of the forwarded options.
+      vi.useFakeTimers({ toFake: ['Date'] })
       const client = createClient({ timeout: 5000 })
       const res = { statusCode: 200 }
       const request = vi.spyOn(Wreck, 'request').mockResolvedValue(res)
