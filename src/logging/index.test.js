@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest'
 
 import { logger } from './index.js'
-import { JWT_ASSERTION_HEADER } from '../spoke.js'
+import { CSRF_TOKEN_HEADER, JWT_ASSERTION_HEADER } from '../spoke.js'
 
 describe('Logger', () => {
   describe('serviceName', () => {
@@ -88,6 +88,30 @@ describe('Logger', () => {
       expect(logLine.toString()).not.toContain('secret-token')
       expect(logLine.toString()).not.toContain('secret-session')
       expect(logLine.toString()).not.toContain('secret-assertion')
+    })
+
+    test('it removes the CSRF token header from logged output', () => {
+      // Arrange
+      const freshLogging = new logger.constructor()
+      const writeSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation(() => true)
+
+      // Act
+      freshLogging.info({
+        req: {
+          headers: {
+            [CSRF_TOKEN_HEADER]: 'secret-csrf-token',
+            accept: 'text/html'
+          }
+        }
+      })
+      const [logLine] = writeSpy.mock.calls[0]
+      writeSpy.mockRestore()
+
+      // Assert
+      expect(logLine.toString()).not.toContain('secret-csrf-token')
+      expect(logLine.toString()).toContain('text/html')
     })
 
     test('it removes an identity provider error_description from the request query', () => {

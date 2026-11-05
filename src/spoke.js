@@ -21,6 +21,16 @@ export const JWT_ASSERTION_HEADER = 'x-lis-jwt-assertion'
  */
 export const COOKIES_POLICY_COOKIE_NAME = 'cookies_policy'
 
+/**
+ * The CSRF plugin's name, which keys its route options and request.plugins,
+ * and the header a hub sends a spoke the session's CSRF token in. Both must
+ * match CSRF_PLUGIN_NAME and CSRF_TOKEN_HEADER in
+ * @defra/lis-infra-ui-services/csrf, which depends on this package, so this
+ * one cannot import them.
+ */
+const CSRF_PLUGIN_NAME = 'lis-csrf'
+export const CSRF_TOKEN_HEADER = 'x-lis-csrf-token'
+
 const INTERNAL_SERVER_ERROR = 500
 const BAD_GATEWAY = 502
 const GENERIC_ERROR_MESSAGE = 'An internal server error occurred'
@@ -113,6 +123,14 @@ export class Spoke {
     return this.#mounts.map((mount) => ({
       method: '*',
       path: `${mount}/{path*}`,
+      options: {
+        plugins: {
+          // The body is streamed through untouched, so the hub cannot read
+          // the token in it; the spoke checks it against the token sent in
+          // CSRF_TOKEN_HEADER. The hub still checks the origin.
+          [CSRF_PLUGIN_NAME]: { token: false }
+        }
+      },
       handler: {
         proxy: {
           passThrough: true,
@@ -140,6 +158,7 @@ export class Spoke {
   async mapUri(request) {
     const serviceToken = await this.#getServiceToken()
     const userToken = this.#getUserToken(request)
+    const csrfToken = request.plugins?.[CSRF_PLUGIN_NAME]?.token
     // Nothing may throw between here and h2o2 making the call, or a
     // half-open probe would never report back.
     this.#breaker.assertCallAllowed()
@@ -147,9 +166,10 @@ export class Spoke {
     // passThrough copies request.headers itself and merges these headers on
     // top, so a header can only be withheld from the spoke by removing it
     // from the request. The spoke only gets the signed-in user's hub JWT,
-    // taken from the hub session and sent in a header, and the cookie-consent
-    // cookie, never the hub session cookie, the inbound authorization header
-    // or a client-supplied assertion header.
+    // taken from the hub session and sent in a header, the session's CSRF
+    // token, likewise, and the cookie-consent cookie, never the hub session
+    // cookie, the inbound authorization header or a client-supplied
+    // assertion or CSRF token header.
     const forwardedCookies = pickCookie(
       request.headers.cookie,
       COOKIES_POLICY_COOKIE_NAME
@@ -157,6 +177,7 @@ export class Spoke {
     delete request.headers.authorization
     delete request.headers.cookie
     delete request.headers[JWT_ASSERTION_HEADER]
+    delete request.headers[CSRF_TOKEN_HEADER]
 
     return {
       uri: `${this.#baseUri}${request.path}${request.url.search}`,
@@ -164,6 +185,8 @@ export class Spoke {
         authorization: `Bearer ${serviceToken}`,
         ...(typeof userToken === 'string' &&
           userToken && { [JWT_ASSERTION_HEADER]: userToken }),
+        ...(typeof csrfToken === 'string' &&
+          csrfToken && { [CSRF_TOKEN_HEADER]: csrfToken }),
         ...(forwardedCookies && { cookie: forwardedCookies })
       }
     }

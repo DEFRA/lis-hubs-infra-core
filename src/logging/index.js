@@ -20,6 +20,8 @@ const redactPaths = [
   'req.headers.cookie',
   // The signed-in user's hub JWT, JWT_ASSERTION_HEADER in spoke.js.
   'req.headers["x-lis-jwt-assertion"]',
+  // The session's CSRF token, CSRF_TOKEN_HEADER in spoke.js.
+  'req.headers["x-lis-csrf-token"]',
   'req.query.error_description',
   'res.headers'
 ]
