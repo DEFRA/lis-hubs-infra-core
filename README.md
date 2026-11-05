@@ -121,6 +121,10 @@ sending the spoke the signed-in user's hub JWT, taken from the hub session by `g
 the `x-lis-jwt-assertion` request header (the `JWT_ASSERTION_HEADER` constant exported by this package). It forwards only the `cookies_policy` consent cookie (the `COOKIES_POLICY_COOKIE_NAME` constant exported by this package),
 so the spoke's layout can render the cookie banner state. It never sends the hub session cookie, any other
 cookie or the browser's `Authorization` header, and strips any client-supplied copy of that header.
+It sends the session's CSRF token, published by the `lis-csrf` plugin from `@defra/lis-infra-ui-services/csrf`
+at `request.plugins['lis-csrf'].token`, in the `x-lis-csrf-token` header, and strips any client-supplied
+copy. Its routes set `plugins: { 'lis-csrf': { token: false } }`: the hub checks a proxied request's
+origin, and the spoke checks the token in its body, which the hub streams through unread.
 
 ```js
 import { createProxyPlugin } from '@defra/lis-hubs-infra-core'
