@@ -6,6 +6,7 @@ import { logger } from './logging/index.js'
 import { CircuitBreaker } from './circuit-breaker.js'
 import { ServiceTokenError } from './base-client.js'
 import { Spoke } from './spoke.js'
+import { JWT_ASSERTION_HEADER } from './spoke.js'
 
 vi.mock('./service-token/issuer.js')
 vi.mock('./circuit-breaker.js')
@@ -25,7 +26,7 @@ function createSpoke(options = {}) {
     port: 3222,
     environment: 'local',
     timeout: 30000,
-    cookieNames: ['livestock_hub_jwt'],
+    getUserToken: () => 'hub.jwt.value',
     ...options
   })
 }
@@ -228,7 +229,7 @@ describe('Spoke', () => {
 
     test('it sends a service token for the spoke in place of the inbound authorization, which passThrough must not see', async () => {
       // Arrange
-      const spoke = createSpoke()
+      const spoke = createSpoke({ getUserToken: () => undefined })
       const request = createRequest({
         headers: { authorization: 'Bearer browser-token', accept: 'text/html' }
       })
@@ -244,33 +245,31 @@ describe('Spoke', () => {
       expect(request.headers).toEqual({ accept: 'text/html' })
     })
 
-    test('it forwards only the hub JWT cookie', async () => {
+    test('it sends the session token in the header and withholds the session cookie', async () => {
       // Arrange
       const spoke = createSpoke()
       const request = createRequest({
-        headers: {
-          cookie:
-            'front-office-session=abc; livestock_hub_jwt=hub.jwt.value; other=1'
-        }
+        headers: { cookie: 'front-office-session=abc' }
       })
 
       // Act
       const mapped = await spoke.mapUri(request)
 
       // Assert
-      expect(mapped.headers.cookie).toBe('livestock_hub_jwt=hub.jwt.value')
+      expect(mapped.headers).toEqual({
+        authorization: 'Bearer service-token',
+        [JWT_ASSERTION_HEADER]: 'hub.jwt.value'
+      })
       expect(request.headers).toEqual({})
     })
 
-    test('it forwards the named cookies alongside the hub JWT, in the browser order', async () => {
+    test('it forwards only the consent cookie with its raw value, dropping the session and other cookies on either side of it', async () => {
       // Arrange
-      const spoke = createSpoke({
-        cookieNames: ['livestock_hub_jwt', 'cookies_policy']
-      })
+      const spoke = createSpoke()
       const request = createRequest({
         headers: {
           cookie:
-            'cookies_policy=%7B%22analytics%22%3Afalse%7D; front-office-session=abc; livestock_hub_jwt=hub.jwt.value'
+            'a=1; front-office-session=abc; cookies_policy=%7B%22analytics%22%3Afalse%7D; b=2'
         }
       })
 
@@ -279,32 +278,119 @@ describe('Spoke', () => {
 
       // Assert
       expect(mapped.headers.cookie).toBe(
-        'cookies_policy=%7B%22analytics%22%3Afalse%7D; livestock_hub_jwt=hub.jwt.value'
+        'cookies_policy=%7B%22analytics%22%3Afalse%7D'
       )
+      expect(mapped.headers.cookie).not.toContain('front-office-session')
+      expect(mapped.headers.cookie).not.toContain('hub.jwt.value')
+      expect(mapped.headers[JWT_ASSERTION_HEADER]).toBe('hub.jwt.value')
       expect(request.headers).toEqual({})
     })
 
-    test('it forwards a named cookie on its own when there is no hub JWT cookie', async () => {
+    test('it passes the request to getUserToken', async () => {
       // Arrange
-      const spoke = createSpoke({
-        cookieNames: ['livestock_hub_jwt', 'cookies_policy']
-      })
+      const getUserToken = vi.fn().mockReturnValue('hub.jwt.value')
+      const spoke = createSpoke({ getUserToken })
+      const request = createRequest()
+
+      // Act
+      await spoke.mapUri(request)
+
+      // Assert
+      expect(getUserToken).toHaveBeenCalledWith(request)
+    })
+
+    test.each([[undefined], [null], ['']])(
+      'it sends no header and still forwards the consent cookie when the session token is %j',
+      async (token) => {
+        // Arrange
+        const spoke = createSpoke({
+          getUserToken: () => token
+        })
+        const request = createRequest({
+          headers: { cookie: 'front-office-session=abc; cookies_policy=x' }
+        })
+
+        // Act
+        const mapped = await spoke.mapUri(request)
+
+        // Assert
+        expect(mapped.headers).toEqual({
+          authorization: 'Bearer service-token',
+          cookie: 'cookies_policy=x'
+        })
+      }
+    )
+
+    test('it sends no cookie when the consent cookie is absent', async () => {
+      // Arrange
+      const spoke = createSpoke()
       const request = createRequest({
-        headers: { cookie: 'front-office-session=abc; cookies_policy=x' }
+        headers: { cookie: 'front-office-session=abc' }
       })
 
       // Act
       const mapped = await spoke.mapUri(request)
 
       // Assert
-      expect(mapped.headers.cookie).toBe('cookies_policy=x')
+      expect(mapped.headers).toEqual({
+        authorization: 'Bearer service-token',
+        [JWT_ASSERTION_HEADER]: 'hub.jwt.value'
+      })
+      expect(request.headers).toEqual({})
     })
 
-    test('it sends no cookie when none of the named cookies are present', async () => {
+    test('it sends no cookie when the browser sent none', async () => {
+      // Arrange
+      const spoke = createSpoke()
+      const request = createRequest()
+
+      // Act
+      const mapped = await spoke.mapUri(request)
+
+      // Assert
+      expect(mapped.headers).toEqual({
+        authorization: 'Bearer service-token',
+        [JWT_ASSERTION_HEADER]: 'hub.jwt.value'
+      })
+      expect(request.headers).toEqual({})
+    })
+
+    test('it drops a user token header sent by the browser and uses the session token', async () => {
       // Arrange
       const spoke = createSpoke()
       const request = createRequest({
-        headers: { cookie: 'front-office-session=abc' }
+        headers: { [JWT_ASSERTION_HEADER]: 'evil', accept: 'text/html' }
+      })
+
+      // Act
+      const mapped = await spoke.mapUri(request)
+
+      // Assert
+      expect(mapped.headers[JWT_ASSERTION_HEADER]).toBe('hub.jwt.value')
+      expect(request.headers).toEqual({ accept: 'text/html' })
+    })
+
+    test('it sends no user token header when the token is not a string', async () => {
+      // Arrange
+      const spoke = createSpoke({
+        getUserToken: () => Promise.resolve('session-jwt')
+      })
+      const request = createRequest({ headers: {} })
+
+      // Act
+      const mapped = await spoke.mapUri(request)
+
+      // Assert
+      expect(mapped.headers).toEqual({
+        authorization: 'Bearer service-token'
+      })
+    })
+
+    test('it drops a user token header sent by the browser when there is no session token', async () => {
+      // Arrange
+      const spoke = createSpoke({ getUserToken: () => undefined })
+      const request = createRequest({
+        headers: { [JWT_ASSERTION_HEADER]: 'evil' }
       })
 
       // Act

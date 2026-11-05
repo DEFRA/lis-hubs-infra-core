@@ -7,22 +7,34 @@ import { CircuitBreaker } from './circuit-breaker.js'
 
 /** @import { CircuitOpenError } from './circuit-breaker.js' */
 
+/**
+ * The header the hub proxy sets on requests to spokes, carrying the signed-in
+ * user's hub JWT. A spoke trusts it only after verifying the service token.
+ */
+export const JWT_ASSERTION_HEADER = 'x-lis-jwt-assertion'
+
+/**
+ * The GOV.UK cookie-consent cookie. It is the only browser cookie the proxy
+ * forwards to spokes, so their pages can render the cookie banner state.
+ * Must match the literal of the same name in @defra/lis-infra-ui-services,
+ * which cannot import this server-only package into its browser bundle.
+ */
+export const COOKIES_POLICY_COOKIE_NAME = 'cookies_policy'
+
 const INTERNAL_SERVER_ERROR = 500
 const BAD_GATEWAY = 502
 const GENERIC_ERROR_MESSAGE = 'An internal server error occurred'
 
 /**
  * @param {string | undefined} cookieHeader
- * @param {string[]} names
- * @returns {string | undefined} a cookie header of the named cookies that are present, in the browser's order, raw `name=value` pairs with encoding untouched
+ * @param {string} name
+ * @returns {string | undefined} the raw `name=value` pair of the named cookie, encoding untouched, or undefined when absent
  */
-function pickCookies(cookieHeader, names) {
-  const picked = cookieHeader
+function pickCookie(cookieHeader, name) {
+  return cookieHeader
     ?.split(';')
     .map((cookie) => cookie.trim())
-    .filter((cookie) => names.some((name) => cookie.startsWith(`${name}=`)))
-
-  return picked?.length ? picked.join('; ') : undefined
+    .find((cookie) => cookie.startsWith(`${name}=`))
 }
 
 /**
@@ -38,7 +50,7 @@ export class Spoke {
   #mounts
   #baseUri
   #timeout
-  #cookieNames
+  #getUserToken
   #breaker
 
   /**
@@ -48,7 +60,7 @@ export class Spoke {
    * @param {number} options.port - the spoke's port, used for local environments only
    * @param {string} options.environment
    * @param {number} options.timeout - milliseconds to wait for the spoke's response headers before answering 504
-   * @param {string[]} options.cookieNames - the browser cookies the spoke may see
+   * @param {(request: object) => string | undefined | null} options.getUserToken - the signed-in user's hub JWT
    * @param {{ failureThreshold?: number, resetTimeout?: number }} [options.circuitBreaker] - see CircuitBreaker for the defaults
    */
   constructor({
@@ -57,7 +69,7 @@ export class Spoke {
     port,
     environment,
     timeout,
-    cookieNames,
+    getUserToken,
     circuitBreaker = {}
   }) {
     if (!Array.isArray(mounts) || mounts.length === 0) {
@@ -71,7 +83,7 @@ export class Spoke {
       port
     ).origin
     this.#timeout = timeout
-    this.#cookieNames = cookieNames
+    this.#getUserToken = getUserToken
     this.#breaker = new CircuitBreaker({
       name: this.#serviceName,
       ...circuitBreaker
@@ -127,25 +139,31 @@ export class Spoke {
    */
   async mapUri(request) {
     const serviceToken = await this.#getServiceToken()
+    const userToken = this.#getUserToken(request)
     // Nothing may throw between here and h2o2 making the call, or a
     // half-open probe would never report back.
     this.#breaker.assertCallAllowed()
 
     // passThrough copies request.headers itself and merges these headers on
     // top, so a header can only be withheld from the spoke by removing it
-    // from the request. The spoke only gets the hub JWT cookie and the
-    // cookies named as forwarded, never the hub's session or credentials.
-    const forwardedCookies = pickCookies(
+    // from the request. The spoke only gets the signed-in user's hub JWT,
+    // taken from the hub session and sent in a header, and the cookie-consent
+    // cookie, never the hub session cookie, the inbound authorization header
+    // or a client-supplied assertion header.
+    const forwardedCookies = pickCookie(
       request.headers.cookie,
-      this.#cookieNames
+      COOKIES_POLICY_COOKIE_NAME
     )
     delete request.headers.authorization
     delete request.headers.cookie
+    delete request.headers[JWT_ASSERTION_HEADER]
 
     return {
       uri: `${this.#baseUri}${request.path}${request.url.search}`,
       headers: {
         authorization: `Bearer ${serviceToken}`,
+        ...(typeof userToken === 'string' &&
+          userToken && { [JWT_ASSERTION_HEADER]: userToken }),
         ...(forwardedCookies && { cookie: forwardedCookies })
       }
     }

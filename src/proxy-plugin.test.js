@@ -13,11 +13,13 @@ const mocks = {
   Spoke: vi.mocked(Spoke)
 }
 
+const getUserToken = () => 'hub.jwt.value'
+
 function createOptions(options = {}) {
   return {
     hubId: 'back-office',
     environment: 'local',
-    hubJwtCookieName: 'livestock_hub_jwt',
+    getUserToken,
     ...options
   }
 }
@@ -50,33 +52,20 @@ describe('createProxyPlugin()', () => {
     vi.clearAllMocks()
   })
 
-  test('requires the hub JWT cookie name', () => {
-    // Act
-    let error
-    try {
-      createProxyPlugin({ hubId: 'back-office', environment: 'local' })
-    } catch (e) {
-      error = e
-    }
-
-    // Assert
-    expect(error.message).toBe('hubJwtCookieName is required')
-  })
-
-  test.each([['not an array'], [[42]], [['']]])(
-    'rejects forwardedCookieNames %j',
-    (forwardedCookieNames) => {
+  test.each([[undefined], [null], ['token']])(
+    'requires getUserToken to be a function, rejecting %j',
+    (invalidGetUserToken) => {
       // Act
       let error
       try {
-        createProxyPlugin(createOptions({ forwardedCookieNames }))
+        createProxyPlugin(createOptions({ getUserToken: invalidGetUserToken }))
       } catch (e) {
         error = e
       }
 
       // Assert
       expect(error.message).toBe(
-        'forwardedCookieNames must be an array of cookie names'
+        'createProxyPlugin requires a getUserToken function'
       )
     }
   )
@@ -126,17 +115,16 @@ describe('createProxyPlugin()', () => {
       port: 3222,
       environment: 'local',
       timeout: 30000,
-      cookieNames: ['livestock_hub_jwt'],
+      getUserToken,
       circuitBreaker: {}
     })
   })
 
-  test('passes the timeout, forwarded cookie names and breaker settings to each spoke', () => {
+  test('passes the timeout and breaker settings to each spoke', () => {
     // Act
     createProxyPlugin(
       createOptions({
         environment: 'prod',
-        forwardedCookieNames: ['cookies_policy'],
         proxyTimeout: 5000,
         circuitBreaker: { failureThreshold: 2, resetTimeout: 100 }
       })
@@ -149,7 +137,7 @@ describe('createProxyPlugin()', () => {
       port: 3222,
       environment: 'prod',
       timeout: 5000,
-      cookieNames: ['livestock_hub_jwt', 'cookies_policy'],
+      getUserToken,
       circuitBreaker: { failureThreshold: 2, resetTimeout: 100 }
     })
   })

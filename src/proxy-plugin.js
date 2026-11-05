@@ -4,14 +4,15 @@ import { getModulesForHub } from '@defra/lis-hubs-infra-registry'
 import { Spoke } from './spoke.js'
 import { positiveInteger } from './positive-integer.js'
 
+export { JWT_ASSERTION_HEADER, COOKIES_POLICY_COOKIE_NAME } from './spoke.js'
+
 const DEFAULT_PROXY_TIMEOUT_MS = 30000
 
 /**
  * @param {object} options
  * @param {string} options.hubId
  * @param {string} options.environment
- * @param {string} options.hubJwtCookieName - the cookie that identifies the user to the spoke
- * @param {string[]} [options.forwardedCookieNames] - other browser cookies the spoke may see, such as the cookie consent choice; none by default
+ * @param {(request: object) => string | undefined | null} options.getUserToken - the hub JWT of the signed-in user, sent to the spoke in the JWT_ASSERTION_HEADER header
  * @param {number} [options.proxyTimeout] - milliseconds to wait for a spoke's response headers before answering 504; 30 seconds by default
  * @param {{ failureThreshold?: number, resetTimeout?: number }} [options.circuitBreaker] - per-spoke circuit breaker settings; see CircuitBreaker for the defaults
  * @returns {{ plugin: { name: string, register: Function } }}
@@ -19,25 +20,17 @@ const DEFAULT_PROXY_TIMEOUT_MS = 30000
 export function createProxyPlugin({
   hubId,
   environment,
-  hubJwtCookieName,
-  forwardedCookieNames = [],
+  getUserToken,
   proxyTimeout = DEFAULT_PROXY_TIMEOUT_MS,
   circuitBreaker = {}
 }) {
-  if (!hubJwtCookieName) {
-    throw new Error('hubJwtCookieName is required')
+  if (typeof getUserToken !== 'function') {
+    throw new Error('createProxyPlugin requires a getUserToken function')
   }
   if (circuitBreaker === null || typeof circuitBreaker !== 'object') {
     throw new Error('circuitBreaker must be an object of settings')
   }
-  if (
-    !Array.isArray(forwardedCookieNames) ||
-    forwardedCookieNames.some((name) => typeof name !== 'string' || !name)
-  ) {
-    throw new Error('forwardedCookieNames must be an array of cookie names')
-  }
 
-  const cookieNames = [hubJwtCookieName, ...forwardedCookieNames]
   const timeout = positiveInteger('proxyTimeout', proxyTimeout)
 
   // One route per mount; hapi matches by specificity, so a verb spoke under
@@ -50,7 +43,7 @@ export function createProxyPlugin({
         port,
         environment,
         timeout,
-        cookieNames,
+        getUserToken,
         circuitBreaker
       })
   )

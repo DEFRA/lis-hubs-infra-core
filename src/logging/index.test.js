@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from 'vitest'
 
 import { logger } from './index.js'
+import { JWT_ASSERTION_HEADER } from '../spoke.js'
 
 describe('Logger', () => {
   describe('serviceName', () => {
@@ -62,7 +63,7 @@ describe('Logger', () => {
   })
 
   describe('redact', () => {
-    test('it removes authorization, cookie and res.headers from logged output', () => {
+    test('it removes authorization, cookie, the user assertion header and res.headers from logged output', () => {
       // Arrange
       const freshLogging = new logger.constructor()
       const writeSpy = vi
@@ -74,7 +75,8 @@ describe('Logger', () => {
         req: {
           headers: {
             authorization: 'Bearer secret-token',
-            cookie: 'session=secret-session'
+            cookie: 'session=secret-session',
+            [JWT_ASSERTION_HEADER]: 'secret-assertion'
           }
         },
         res: { headers: { 'set-cookie': 'session=secret-session' } }
@@ -85,6 +87,7 @@ describe('Logger', () => {
       // Assert
       expect(logLine.toString()).not.toContain('secret-token')
       expect(logLine.toString()).not.toContain('secret-session')
+      expect(logLine.toString()).not.toContain('secret-assertion')
     })
 
     test('it removes an identity provider error_description from the request query', () => {

@@ -117,19 +117,19 @@ Locally, lis-dev's `lis-fake-sts` service stands in for AWS STS. See
 
 `createProxyPlugin` is used by hubs. It registers a proxy route for every module that
 `@defra/lis-hubs-infra-registry` lists for the hub, forwarding requests to that module's spoke and
-forwarding only the hub JWT cookie and any cookies named in `forwardedCookieNames` (for example
-the cookie consent choice, which the spoke's layout needs to decide whether to show the banner),
-never the hub session cookie or the `Authorization` header.
+sending the spoke the signed-in user's hub JWT, taken from the hub session by `getUserToken`, in
+the `x-lis-jwt-assertion` request header (the `JWT_ASSERTION_HEADER` constant exported by this package). It forwards only the `cookies_policy` consent cookie (the `COOKIES_POLICY_COOKIE_NAME` constant exported by this package),
+so the spoke's layout can render the cookie banner state. It never sends the hub session cookie, any other
+cookie or the browser's `Authorization` header, and strips any client-supplied copy of that header.
 
 ```js
 import { createProxyPlugin } from '@defra/lis-hubs-infra-core'
-import { COOKIES_POLICY_COOKIE_NAME } from '@defra/lis-infra-ui-services/cookies/cookies-policy'
+import { getHubJwt } from '@defra/lis-hubs-infra-access/authentication'
 
 const proxy = createProxyPlugin({
   hubId: 'front-office',
   environment: config.get('environment'),
-  hubJwtCookieName: config.get('auth.hubJwt.cookieName'),
-  forwardedCookieNames: [COOKIES_POLICY_COOKIE_NAME], // optional, none by default
+  getUserToken: getHubJwt,
   proxyTimeout: 30000, // optional, milliseconds to wait for a spoke's response headers; 30s by default
   circuitBreaker: { failureThreshold: 5, resetTimeout: 30000 } // optional, see below for the defaults
 })

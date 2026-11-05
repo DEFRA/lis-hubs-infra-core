@@ -18,6 +18,8 @@ const validFormats = new Set(['ecs', 'pretty-print'])
 const redactPaths = [
   'req.headers.authorization',
   'req.headers.cookie',
+  // The signed-in user's hub JWT, JWT_ASSERTION_HEADER in spoke.js.
+  'req.headers["x-lis-jwt-assertion"]',
   'req.query.error_description',
   'res.headers'
 ]
