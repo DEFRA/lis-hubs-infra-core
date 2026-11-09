@@ -44,7 +44,7 @@ jobs:
     name: 'Tag Main'
     needs: [get-version, validate, sonar-analysis]
     if: needs.sonar-analysis.outputs.quality-gate-status == 'PASSED'
-    uses: DEFRA/lis-github-actions/.github/workflows/tag.yml@0.5.0
+    uses: DEFRA/lis-github-actions/.github/workflows/tag.yml@0.7.2
     with:
       version: ${{ needs.get-version.outputs.version }}
       ref: ${{ github.event.pull_request.merge_commit_sha }}
