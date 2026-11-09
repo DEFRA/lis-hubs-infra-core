@@ -16,7 +16,7 @@ jobs:
   get-version:
     name: 'Calculate Stable Version'
     if: github.event.pull_request.merged == true
-    uses: DEFRA/lis-github-actions/.github/workflows/version.yml@0.5.0
+    uses: DEFRA/lis-github-actions/.github/workflows/version.yml@0.7.2
     with:
       ref: ${{ github.event.pull_request.merge_commit_sha }}
       branch: ${{ github.event.pull_request.head.ref }}
