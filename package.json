@@ -44,12 +44,12 @@
     "@defra/lis-hubs-infra-registry": "^0.13.0",
     "@defra/lis-infra-eslint-config": "^0.6.0",
     "@types/node": "^26.4.0",
-    "@vitest/coverage-istanbul": "^4.1.10",
+    "@vitest/coverage-istanbul": "^5.1.0",
     "audit-ci": "^7.1.0",
     "eslint": "^9.0.0",
     "husky": "^9.1.7",
     "prettier": "^3.9.6",
-    "vitest": "^4.1.10"
+    "vitest": "^5.1.0"
   },
   "peerDependencies": {
     "@defra/lis-hubs-infra-registry": ">=0.13.0 <1.0.0"
