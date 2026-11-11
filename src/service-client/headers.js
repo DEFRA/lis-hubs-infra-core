@@ -5,7 +5,7 @@ import { ServiceTokenError } from '../service-token/service-token-error.js'
 /** @import { Service } from './request.js' */
 
 // The service token and API key are the client's to set, never the caller's
-const RESERVED_HEADERS = ['authorization', 'x-api-key']
+const RESERVED_HEADERS = new Set(['authorization', 'x-api-key'])
 
 /**
  * @param {object} callerHeaders - headers supplied on this call
@@ -14,7 +14,7 @@ const RESERVED_HEADERS = ['authorization', 'x-api-key']
 function withoutReserved(callerHeaders) {
   return Object.fromEntries(
     Object.entries(callerHeaders).filter(
-      ([key]) => !RESERVED_HEADERS.includes(key.toLowerCase())
+      ([key]) => !RESERVED_HEADERS.has(key.toLowerCase())
     )
   )
 }
