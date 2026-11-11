@@ -4,7 +4,7 @@ import Boom from '@hapi/boom'
 import { getServiceToken } from './service-token/issuer.js'
 import { logger } from './logging/index.js'
 import { CircuitBreaker } from './circuit-breaker.js'
-import { ServiceTokenError } from './base-client.js'
+import { ServiceTokenError } from './service-token/service-token-error.js'
 import { Spoke } from './spoke.js'
 import { JWT_ASSERTION_HEADER } from './spoke.js'
 

@@ -11,9 +11,11 @@ export {
 } from './proxy-plugin.js'
 export { Spoke } from './spoke.js'
 export { getServiceBaseUrl } from './get-service-base-url.js'
-export { BaseClient, ServiceTokenError } from './base-client.js'
+export { createServiceClient } from './service-client/index.js'
 export {
   CIRCUIT_STATES,
   CircuitBreaker,
   CircuitOpenError
 } from './circuit-breaker.js'
+export { ServiceRequestError } from './service-client/service-request-error.js'
+export { ServiceTokenError } from './service-token/service-token-error.js'
