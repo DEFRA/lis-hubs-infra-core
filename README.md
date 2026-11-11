@@ -71,7 +71,7 @@ requestContext.getHeaders() // { 'x-cdp-request-id': '...' }, for your own outbo
 
 ### Calling other LIS services
 
-Extend `BaseClient` to call another LIS service (for example a spoke's be4fe). It:
+Use `createServiceClient` to call another LIS service (for example a spoke's be4fe). It:
 
 - works out the service's base URL for the current environment (`getServiceBaseUrl`)
 - adds the correlation ID header
@@ -84,29 +84,28 @@ Extend `BaseClient` to call another LIS service (for example a spoke's be4fe). I
   `failureThreshold` and `resetTimeout`, or `false` disables it)
 
 ```js
-import { BaseClient } from '@defra/lis-hubs-infra-core'
+import { createServiceClient } from '@defra/lis-hubs-infra-core'
 
-class CattleHomeBe4FeClient extends BaseClient {
-  constructor({ environment, apiKey }) {
-    super({
-      environment,
-      serviceName: 'lis-be4fe-cattle-home',
-      port: 8087, // only used for 'local' and 'docker_compose'
-      apiKey
-    })
-  }
+const be4fe = createServiceClient({
+  environment,
+  serviceName: 'lis-be4fe-cattle-home',
+  port: 8087, // only used for 'local' and 'docker_compose'
+  apiKey
+})
 
-  async getHolding(cph) {
-    const { payload } = await this._get(`api/cphs/${encodeURIComponent(cph)}`)
-    return payload
-  }
+export async function getHolding(cph) {
+  const { payload } = await be4fe.get(`api/cphs/${encodeURIComponent(cph)}`)
+  return payload
 }
 ```
 
-`_get`, `_post`, `_put`, `_patch` and `_delete` take a path and
-[Wreck](https://hapi.dev/module/wreck/) options. If a service token can't be obtained, they throw
-`ServiceTokenError`; while the service's circuit is open, `CircuitOpenError`. Both carry a
-`statusCode` of 503. Other thrown errors carry `statusCode`, `serviceName`, `method`, `path` and `cause`
+It returns `get`, `post`, `put`, `patch` and `delete`, each taking a path relative to the service's
+base URL and [Wreck](https://hapi.dev/module/wreck/) options. They are plain functions, so they can
+be destructured or passed around, and nothing the client holds can be reached or replaced from
+outside. If a service token can't be obtained, they throw `ServiceTokenError`; while the service's
+circuit is open, `CircuitOpenError`. Both carry a `statusCode` of 503. A call that fails any other
+way (the service can't be reached, times out, or answers with an error status) throws
+`ServiceRequestError`, which carries `statusCode`, `serviceName`, `method`, `path` and `cause`
 for code that catches the error. The shared logger emits only the error's type, message and stack,
 so a caller that wants them in a log line must put them in the message or `logger.context`.
 
@@ -152,7 +151,7 @@ registers the same full patterns and sees the URL the browser asked for. hapi ma
 
 ### Circuit breaker
 
-`CircuitBreaker` protects calls to one downstream service, and is what `BaseClient` and the hub
+`CircuitBreaker` protects calls to one downstream service, and is what `createServiceClient` and the hub
 proxy use. Only a transport failure (connection refused, timeout) counts against it; any response,
 whatever its status, proves the service is up. Outcomes of calls that started before the circuit
 opened are ignored.

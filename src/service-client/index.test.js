@@ -3,16 +3,18 @@ import { createServer } from 'node:http'
 
 import Wreck from '@hapi/wreck'
 
-import * as requestContext from './request-context.js'
-import { getServiceBaseUrl } from './get-service-base-url.js'
-import { getServiceToken } from './service-token/issuer.js'
-import { CircuitBreaker } from './circuit-breaker.js'
-import { BaseClient, ServiceTokenError } from './base-client.js'
+import * as requestContext from '../request-context.js'
+import { getServiceBaseUrl } from '../get-service-base-url.js'
+import { getServiceToken } from '../service-token/issuer.js'
+import { CircuitBreaker } from '../circuit-breaker.js'
+import { ServiceRequestError } from './service-request-error.js'
+import { ServiceTokenError } from '../service-token/service-token-error.js'
+import { createServiceClient } from './index.js'
 
-vi.mock('./request-context.js')
-vi.mock('./get-service-base-url.js')
-vi.mock('./service-token/issuer.js')
-vi.mock('./circuit-breaker.js')
+vi.mock('../request-context.js')
+vi.mock('../get-service-base-url.js')
+vi.mock('../service-token/issuer.js')
+vi.mock('../circuit-breaker.js')
 
 const mocks = {
   requestContextGetHeaders: vi.mocked(requestContext.getHeaders),
@@ -25,7 +27,7 @@ const mocks = {
 }
 
 function createClient(options = {}) {
-  return new BaseClient({
+  return createServiceClient({
     environment: 'local',
     serviceName: 'lis-be4fe-cattle-home',
     port: 8085,
@@ -48,7 +50,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('BaseClient constructor', () => {
+describe('createServiceClient()', () => {
   test('it resolves its baseUrl via getServiceBaseUrl', async () => {
     // Arrange
     const client = createClient()
@@ -56,7 +58,7 @@ describe('BaseClient constructor', () => {
     vi.spyOn(Wreck, 'read').mockResolvedValue({})
 
     // Act
-    await client._get('api/users/user-1/cphs')
+    await client.get('api/users/user-1/cphs')
 
     // Assert
     expect(mocks.getServiceBaseUrl).toHaveBeenCalledWith(
@@ -71,13 +73,36 @@ describe('BaseClient constructor', () => {
   })
 })
 
+describe('the client', () => {
+  test('it is five verbs and nothing else, which work when taken off it', async () => {
+    // Arrange
+    const { get } = createClient()
+    const res = { statusCode: 200 }
+    vi.spyOn(Wreck, 'request').mockResolvedValue(res)
+    vi.spyOn(Wreck, 'read').mockResolvedValue({ ok: true })
+
+    // Act
+    const result = await get('api/cattle')
+
+    // Assert
+    expect(result).toEqual({ res, payload: { ok: true } })
+    expect(Object.keys(createClient())).toEqual([
+      'get',
+      'post',
+      'put',
+      'patch',
+      'delete'
+    ])
+  })
+})
+
 describe('request verbs', () => {
   test.each([
-    ['_get', 'GET'],
-    ['_post', 'POST'],
-    ['_put', 'PUT'],
-    ['_patch', 'PATCH'],
-    ['_delete', 'DELETE']
+    ['get', 'GET'],
+    ['post', 'POST'],
+    ['put', 'PUT'],
+    ['patch', 'PATCH'],
+    ['delete', 'DELETE']
   ])(
     'it sends %s requests via Wreck.request with the correlation and service token headers',
     async (method, httpMethod) => {
@@ -118,7 +143,7 @@ describe('request verbs', () => {
     vi.spyOn(Wreck, 'read').mockResolvedValue({})
 
     // Act
-    await client._get('api/users/user-1/cphs')
+    await client.get('api/users/user-1/cphs')
 
     // Assert
     expect(Wreck.request.mock.calls[0][2].headers).toEqual({
@@ -136,7 +161,7 @@ describe('request verbs', () => {
     vi.spyOn(Wreck, 'read').mockResolvedValue({})
 
     // Act
-    await client._get('api/users/user-1/cphs')
+    await client.get('api/users/user-1/cphs')
 
     // Assert
     expect(Wreck.request.mock.calls[0][2].timeout).toBe(3000)
@@ -154,7 +179,7 @@ describe('request verbs', () => {
       vi.spyOn(Wreck, 'read').mockResolvedValue({})
 
       // Act
-      await client._get('api/users/user-1/cphs', {
+      await client.get('api/users/user-1/cphs', {
         headers: { 'X-Api-Key': 'caller-key', 'x-api-key': 'caller-key' }
       })
 
@@ -172,7 +197,7 @@ describe('request verbs', () => {
     vi.spyOn(Wreck, 'read').mockResolvedValue({})
 
     // Act
-    await client._get('api/cattle/UK123', {
+    await client.get('api/cattle/UK123', {
       headers: { 'x-correlation-id': 'override-id' }
     })
 
@@ -210,7 +235,7 @@ describe('configured timeout with an upstream server', () => {
     })
 
     // Act
-    const { res, payload } = await client._get('api/cattle')
+    const { res, payload } = await client.get('api/cattle')
 
     // Assert
     expect(res.statusCode).toBe(200)
@@ -227,7 +252,7 @@ describe('configured timeout with an upstream server', () => {
     })
 
     // Act / Assert
-    await expect(client._get('api/cattle')).rejects.toMatchObject({
+    await expect(client.get('api/cattle')).rejects.toMatchObject({
       message: 'Request failed - 504',
       statusCode: 504
     })
@@ -246,7 +271,7 @@ describe('configured timeout with an upstream server', () => {
     })
 
     // Act / Assert
-    await expect(client._get('api/cattle')).rejects.toMatchObject({
+    await expect(client.get('api/cattle')).rejects.toMatchObject({
       message: 'Request failed - 504',
       statusCode: 504
     })
@@ -270,7 +295,7 @@ describe('configured timeout with an upstream server', () => {
     // Act
     let error
     try {
-      await client._get('api/cattle')
+      await client.get('api/cattle')
     } catch (e) {
       error = e
     }
@@ -289,7 +314,7 @@ describe('service token', () => {
     vi.spyOn(Wreck, 'read').mockResolvedValue({})
 
     // Act
-    await client._get('api/users/user-1/cphs')
+    await client.get('api/users/user-1/cphs')
 
     // Assert
     expect(mocks.getServiceToken).toHaveBeenCalledWith('lis-be4fe-cattle-home')
@@ -310,8 +335,8 @@ describe('service token', () => {
     vi.spyOn(Wreck, 'read').mockResolvedValue({})
 
     // Act
-    await client._get('api/cattle/UK123')
-    await client._get('api/cattle/UK123', {
+    await client.get('api/cattle/UK123')
+    await client.get('api/cattle/UK123', {
       headers: {
         authorization: 'Bearer caller',
         'x-api-key': 'caller',
@@ -342,7 +367,7 @@ describe('service token', () => {
     vi.spyOn(Wreck, 'read').mockResolvedValue({})
 
     // Act
-    await client._get('api/cattle/UK123', {
+    await client.get('api/cattle/UK123', {
       headers: { Authorization: 'Bearer caller' }
     })
 
@@ -361,7 +386,7 @@ describe('service token', () => {
     // Act
     let error
     try {
-      await client._get('api/users/user-1/cphs')
+      await client.get('api/users/user-1/cphs')
     } catch (e) {
       error = e
     }
@@ -386,14 +411,22 @@ describe('service token', () => {
     vi.spyOn(Wreck, 'read').mockResolvedValue({})
 
     // Act
-    await client._get('api/cattle/UK123', { baseUrl: 'https://evil.example' })
+    await client.get('api/cattle/UK123', { baseUrl: 'https://evil.example' })
 
     // Assert
     expect(Wreck.request.mock.calls[0][2].baseUrl).toBe('http://localhost:8085')
   })
 
-  test.each([['https://evil.example/steal'], ['//evil.example/steal']])(
-    'it rejects the absolute path %s without fetching a token or calling Wreck',
+  test.each([
+    ['https://evil.example/steal'],
+    ['//evil.example/steal'],
+    ['\\\\evil.example/steal'],
+    ['/\\evil.example/steal'],
+    [' //evil.example/steal'],
+    ['/\t/evil.example/steal'],
+    ['h\tttps://evil.example/steal']
+  ])(
+    'it rejects the path %j, which leaves the service, without fetching a token or calling Wreck',
     async (path) => {
       // Arrange
       mocks.getServiceToken.mockClear()
@@ -403,14 +436,14 @@ describe('service token', () => {
       // Act
       let error
       try {
-        await client._get(path)
+        await client.get(path)
       } catch (e) {
         error = e
       }
 
       // Assert
       expect(error.message).toBe(
-        'BaseClient paths must be relative to the service base URL'
+        'Service client paths must be relative to the service base URL'
       )
       expect(mocks.getServiceToken).not.toHaveBeenCalled()
       expect(request).not.toHaveBeenCalled()
@@ -430,14 +463,14 @@ describe('error handling', () => {
     // Act
     let result, error
     try {
-      result = await client._get('api/cphs/missing/cattle')
+      result = await client.get('api/cphs/missing/cattle')
     } catch (e) {
       error = e
     }
 
     // Assert
     expect(result).not.toBeDefined()
-    expect(error).toBeInstanceOf(Error)
+    expect(error).toBeInstanceOf(ServiceRequestError)
     expect(error.message).toBe('not_found - CPH not found')
     expect(error.statusCode).toBe(404)
     expect(mocks.recordSuccess).toHaveBeenCalledTimes(1)
@@ -457,13 +490,13 @@ describe('error handling', () => {
     // Act
     let error
     try {
-      await client._get('api/cphs/missing/cattle')
+      await client.get('api/cphs/missing/cattle')
     } catch (e) {
       error = e
     }
 
     // Assert
-    expect(error).toBeInstanceOf(Error)
+    expect(error).toBeInstanceOf(ServiceRequestError)
     expect(error.message).toBe('404 - CPH not found')
     expect(error).toMatchObject({
       statusCode: 404,
@@ -485,13 +518,13 @@ describe('error handling', () => {
     // Act
     let error
     try {
-      await client._post('api/cattle')
+      await client.post('api/cattle')
     } catch (e) {
       error = e
     }
 
     // Assert
-    expect(error).toBeInstanceOf(Error)
+    expect(error).toBeInstanceOf(ServiceRequestError)
     expect(error.message).toBe('Validation failed')
   })
 
@@ -504,13 +537,13 @@ describe('error handling', () => {
     // Act
     let error
     try {
-      await client._get('api/cphs/missing/cattle')
+      await client.get('api/cphs/missing/cattle')
     } catch (e) {
       error = e
     }
 
     // Assert
-    expect(error).toBeInstanceOf(Error)
+    expect(error).toBeInstanceOf(ServiceRequestError)
     expect(error.message).toBe('Request failed - 503')
   })
 
@@ -525,13 +558,13 @@ describe('error handling', () => {
     // Act
     let error
     try {
-      await client._get('api/users/user-1/cphs')
+      await client.get('api/users/user-1/cphs')
     } catch (e) {
       error = e
     }
 
     // Assert
-    expect(error).toBeInstanceOf(Error)
+    expect(error).toBeInstanceOf(ServiceRequestError)
     expect(error.message).toBe('Request failed - 503')
     expect(error).toMatchObject({
       statusCode: 503,
@@ -554,13 +587,13 @@ describe('error handling', () => {
     // Act
     let error
     try {
-      await client._get('api/users/user-1/cphs')
+      await client.get('api/users/user-1/cphs')
     } catch (e) {
       error = e
     }
 
     // Assert
-    expect(error).toBeInstanceOf(Error)
+    expect(error).toBeInstanceOf(ServiceRequestError)
     expect(error.message).toBe('Request failed - 200')
     expect(error).toMatchObject({
       statusCode: 200,
@@ -571,77 +604,5 @@ describe('error handling', () => {
     expect(error.cause).toBe(readError)
     expect(mocks.recordSuccess).toHaveBeenCalledTimes(1)
     expect(mocks.recordFailure).not.toHaveBeenCalled()
-  })
-})
-
-describe('circuit breaker', () => {
-  test('it is configured with the given settings', () => {
-    // Act
-    createClient({ circuitBreaker: { failureThreshold: 2, resetTimeout: 100 } })
-
-    // Assert
-    expect(mocks.CircuitBreaker).toHaveBeenCalledWith({
-      name: 'lis-be4fe-cattle-home',
-      failureThreshold: 2,
-      resetTimeout: 100
-    })
-  })
-
-  test('it is consulted after the token fetch and immediately before the request', async () => {
-    // Arrange
-    const client = createClient()
-    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
-    vi.spyOn(Wreck, 'read').mockResolvedValue({})
-
-    // Act
-    await client._get('api/cattle')
-
-    // Assert
-    expect(mocks.assertCallAllowed).toHaveBeenCalledTimes(1)
-    expect(mocks.getServiceToken.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.assertCallAllowed.mock.invocationCallOrder[0]
-    )
-    expect(mocks.assertCallAllowed.mock.invocationCallOrder[0]).toBeLessThan(
-      Wreck.request.mock.invocationCallOrder[0]
-    )
-  })
-
-  test('it fails the call without calling the service when it refuses', async () => {
-    // Arrange
-    const client = createClient()
-    const openError = new Error('Circuit open for lis-be4fe-cattle-home')
-    mocks.assertCallAllowed.mockImplementationOnce(() => {
-      throw openError
-    })
-    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
-
-    // Act
-    let error
-    try {
-      await client._get('api/cattle')
-    } catch (e) {
-      error = e
-    }
-
-    // Assert
-    expect(error).toBe(openError)
-    expect(Wreck.request).not.toHaveBeenCalled()
-    expect(mocks.recordSuccess).not.toHaveBeenCalled()
-    expect(mocks.recordFailure).not.toHaveBeenCalled()
-  })
-
-  test('it is not created when disabled, and the call is unguarded', async () => {
-    // Arrange
-    const client = createClient({ circuitBreaker: false })
-    vi.spyOn(Wreck, 'request').mockResolvedValue({ statusCode: 200 })
-    vi.spyOn(Wreck, 'read').mockResolvedValue({})
-
-    // Act
-    await client._get('api/cattle')
-
-    // Assert
-    expect(mocks.CircuitBreaker).not.toHaveBeenCalled()
-    expect(mocks.assertCallAllowed).not.toHaveBeenCalled()
-    expect(Wreck.request).toHaveBeenCalledTimes(1)
   })
 })

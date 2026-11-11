@@ -2,7 +2,7 @@ import Boom from '@hapi/boom'
 
 import { getServiceBaseUrl } from './get-service-base-url.js'
 import { getServiceToken } from './service-token/issuer.js'
-import { ServiceTokenError } from './base-client.js'
+import { ServiceTokenError } from './service-token/service-token-error.js'
 import { CircuitBreaker } from './circuit-breaker.js'
 
 /** @import { CircuitOpenError } from './circuit-breaker.js' */
