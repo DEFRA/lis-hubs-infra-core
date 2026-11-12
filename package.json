@@ -42,7 +42,7 @@
   },
   "devDependencies": {
     "@defra/lis-hubs-infra-registry": "^0.13.6",
-    "@defra/lis-infra-eslint-config": "^0.12.4",
+    "@defra/lis-infra-eslint-config": "^0.12.7",
     "@types/node": "^26.6.6",
     "@vitest/coverage-istanbul": "^5.1.0",
     "audit-ci": "^7.1.0",
