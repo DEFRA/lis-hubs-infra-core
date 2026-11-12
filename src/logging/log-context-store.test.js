@@ -72,7 +72,6 @@ describe('LogContextStore', () => {
       const testHashSecret = 'test-fixture-hash-secret'
       const store = new LogContextStore({ logger: { warn: vi.fn() } })
       store.hashSecret = testHashSecret
-      // eslint-disable-next-line sonarjs/hardcoded-secret-signatures -- test fixture, not a real secret
       const expectedHash = createHmac('sha256', testHashSecret)
         .update('user@example.com')
         .digest('hex')

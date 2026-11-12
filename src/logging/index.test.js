@@ -1,3 +1,4 @@
+/* eslint-disable new-cap -- logger.constructor is the class under test, reached via the instance */
 import { describe, expect, test, vi } from 'vitest'
 
 import { logger } from './index.js'

@@ -1,3 +1,5 @@
+/** @import { Server } from '@hapi/hapi' */
+
 import { ContextStore } from './context-store.js'
 import { logger } from './logging/index.js'
 const contextStore = new ContextStore()
@@ -5,6 +7,10 @@ const contextStore = new ContextStore()
 export const plugin = {
   name: 'requestContext',
   version: '1.0.0',
+  /**
+   * Registers the request context onRequest hook.
+   * @param {Server} server - the Hapi server the plugin is registered on
+   */
   register(server) {
     server.ext('onRequest', onRequest)
   }
