@@ -142,6 +142,16 @@ describe('createProxyPlugin()', () => {
     })
   })
 
+  test('passes the Google Tag Manager container id to each spoke', () => {
+    // Act
+    createProxyPlugin(createOptions({ gtmId: 'GTM-ABC1234' }))
+
+    // Assert
+    expect(mocks.Spoke).toHaveBeenCalledWith(
+      expect.objectContaining({ gtmId: 'GTM-ABC1234' })
+    )
+  })
+
   test('registers h2o2 and each spoke route on the server', async () => {
     // Arrange
     const server = { route: vi.fn(), register: vi.fn() }

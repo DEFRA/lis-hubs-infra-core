@@ -6,7 +6,7 @@ import { logger } from './logging/index.js'
 import { CircuitBreaker } from './circuit-breaker.js'
 import { ServiceTokenError } from './service-token/service-token-error.js'
 import { Spoke } from './spoke.js'
-import { JWT_ASSERTION_HEADER } from './spoke.js'
+import { GTM_ID_HEADER, JWT_ASSERTION_HEADER } from './spoke.js'
 
 vi.mock('./service-token/issuer.js')
 vi.mock('./circuit-breaker.js')
@@ -402,6 +402,51 @@ describe('Spoke', () => {
       })
       expect(request.headers).toEqual({})
     })
+
+    test("it sends the hub's Google Tag Manager container id in the header", async () => {
+      // Arrange
+      const spoke = createSpoke({ gtmId: 'GTM-ABC1234' })
+      const request = createRequest()
+
+      // Act
+      const mapped = await spoke.mapUri(request)
+
+      // Assert
+      expect(mapped.headers[GTM_ID_HEADER]).toBe('GTM-ABC1234')
+    })
+
+    test("it drops a container id header sent by the browser and uses the hub's", async () => {
+      // Arrange
+      const spoke = createSpoke({ gtmId: 'GTM-ABC1234' })
+      const request = createRequest({
+        headers: { [GTM_ID_HEADER]: 'GTM-EVIL', accept: 'text/html' }
+      })
+
+      // Act
+      const mapped = await spoke.mapUri(request)
+
+      // Assert
+      expect(mapped.headers[GTM_ID_HEADER]).toBe('GTM-ABC1234')
+      expect(request.headers).toEqual({ accept: 'text/html' })
+    })
+
+    test.each([undefined, null, '', 123])(
+      "it sends no container id header, dropping one sent by the browser, when the hub's is %j",
+      async (gtmId) => {
+        // Arrange
+        const spoke = createSpoke({ gtmId })
+        const request = createRequest({
+          headers: { [GTM_ID_HEADER]: 'GTM-EVIL' }
+        })
+
+        // Act
+        const mapped = await spoke.mapUri(request)
+
+        // Assert
+        expect(mapped.headers).not.toHaveProperty(GTM_ID_HEADER)
+        expect(request.headers).toEqual({})
+      }
+    )
 
     test('it consults the breaker after the token fetch', async () => {
       // Arrange

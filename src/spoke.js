@@ -31,6 +31,13 @@ export const COOKIES_POLICY_COOKIE_NAME = 'cookies_policy'
 const CSRF_PLUGIN_NAME = 'lis-csrf'
 export const CSRF_TOKEN_HEADER = 'x-lis-csrf-token'
 
+/**
+ * The header a hub sends a spoke its Google Tag Manager container id in, so
+ * each hub can report to its own container. Must match GTM_ID_HEADER in
+ * @defra/lis-infra-ui-services, which reads it when rendering the layout.
+ */
+export const GTM_ID_HEADER = 'x-lis-gtm-id'
+
 const INTERNAL_SERVER_ERROR = 500
 const BAD_GATEWAY = 502
 const GENERIC_ERROR_MESSAGE = 'An internal server error occurred'
@@ -61,6 +68,7 @@ export class Spoke {
   #baseUri
   #timeout
   #getUserToken
+  #gtmId
   #breaker
 
   /**
@@ -71,6 +79,7 @@ export class Spoke {
    * @param {string} options.environment
    * @param {number} options.timeout - milliseconds to wait for the spoke's response headers before answering 504
    * @param {(request: object) => string | undefined | null} options.getUserToken - the signed-in user's hub JWT
+   * @param {string} [options.gtmId] - the hub's Google Tag Manager container id, sent to the spoke in GTM_ID_HEADER; nothing is sent without one
    * @param {{ failureThreshold?: number, resetTimeout?: number }} [options.circuitBreaker] - see CircuitBreaker for the defaults
    */
   constructor({
@@ -80,6 +89,7 @@ export class Spoke {
     environment,
     timeout,
     getUserToken,
+    gtmId,
     circuitBreaker = {}
   }) {
     if (!Array.isArray(mounts) || mounts.length === 0) {
@@ -94,6 +104,7 @@ export class Spoke {
     ).origin
     this.#timeout = timeout
     this.#getUserToken = getUserToken
+    this.#gtmId = gtmId
     this.#breaker = new CircuitBreaker({
       name: this.#serviceName,
       ...circuitBreaker
@@ -167,9 +178,10 @@ export class Spoke {
     // top, so a header can only be withheld from the spoke by removing it
     // from the request. The spoke only gets the signed-in user's hub JWT,
     // taken from the hub session and sent in a header, the session's CSRF
-    // token, likewise, and the cookie-consent cookie, never the hub session
-    // cookie, the inbound authorization header or a client-supplied
-    // assertion or CSRF token header.
+    // token, likewise, the hub's Google Tag Manager container id and the
+    // cookie-consent cookie, never the hub session cookie, the inbound
+    // authorization header or a client-supplied assertion, CSRF token or
+    // container id header.
     const forwardedCookies = pickCookie(
       request.headers.cookie,
       COOKIES_POLICY_COOKIE_NAME
@@ -178,6 +190,7 @@ export class Spoke {
     delete request.headers.cookie
     delete request.headers[JWT_ASSERTION_HEADER]
     delete request.headers[CSRF_TOKEN_HEADER]
+    delete request.headers[GTM_ID_HEADER]
 
     return {
       uri: `${this.#baseUri}${request.path}${request.url.search}`,
@@ -187,6 +200,8 @@ export class Spoke {
           userToken && { [JWT_ASSERTION_HEADER]: userToken }),
         ...(typeof csrfToken === 'string' &&
           csrfToken && { [CSRF_TOKEN_HEADER]: csrfToken }),
+        ...(typeof this.#gtmId === 'string' &&
+          this.#gtmId && { [GTM_ID_HEADER]: this.#gtmId }),
         ...(forwardedCookies && { cookie: forwardedCookies })
       }
     }

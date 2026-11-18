@@ -13,6 +13,7 @@ const DEFAULT_PROXY_TIMEOUT_MS = 30000
  * @param {string} options.hubId
  * @param {string} options.environment
  * @param {(request: object) => string | undefined | null} options.getUserToken - the hub JWT of the signed-in user, sent to the spoke in the JWT_ASSERTION_HEADER header
+ * @param {string} [options.gtmId] - the hub's Google Tag Manager container id, sent to every spoke in the GTM_ID_HEADER header; nothing is sent without one
  * @param {number} [options.proxyTimeout] - milliseconds to wait for a spoke's response headers before answering 504; 30 seconds by default
  * @param {{ failureThreshold?: number, resetTimeout?: number }} [options.circuitBreaker] - per-spoke circuit breaker settings; see CircuitBreaker for the defaults
  * @returns {{ plugin: { name: string, register: Function } }}
@@ -21,6 +22,7 @@ export function createProxyPlugin({
   hubId,
   environment,
   getUserToken,
+  gtmId,
   proxyTimeout = DEFAULT_PROXY_TIMEOUT_MS,
   circuitBreaker = {}
 }) {
@@ -44,6 +46,7 @@ export function createProxyPlugin({
         environment,
         timeout,
         getUserToken,
+        gtmId,
         circuitBreaker
       })
   )

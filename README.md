@@ -125,6 +125,10 @@ at `request.plugins['lis-csrf'].token`, in the `x-lis-csrf-token` header, and st
 copy. Its routes set `plugins: { 'lis-csrf': { token: false } }`: the hub checks a proxied request's
 origin, and the spoke checks the token in its body, which the hub streams through unread.
 
+Given a `gtmId`, the hub's Google Tag Manager container id, it sends that to every spoke in the
+`x-lis-gtm-id` header, so a spoke's pages report to the container of the hub they were reached
+through. It strips any client-supplied copy, and sends nothing without one.
+
 ```js
 import { createProxyPlugin } from '@defra/lis-hubs-infra-core'
 import { getHubJwt } from '@defra/lis-hubs-infra-access/authentication'
@@ -133,6 +137,7 @@ const proxy = createProxyPlugin({
   hubId: 'front-office',
   environment: config.get('environment'),
   getUserToken: getHubJwt,
+  gtmId: config.get('gtmId'), // optional, the hub's Google Tag Manager container id
   proxyTimeout: 30000, // optional, milliseconds to wait for a spoke's response headers; 30s by default
   circuitBreaker: { failureThreshold: 5, resetTimeout: 30000 } // optional, see below for the defaults
 })
