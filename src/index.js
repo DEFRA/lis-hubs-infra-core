@@ -13,6 +13,10 @@ export { Spoke } from './spoke.js'
 export { getServiceBaseUrl } from './get-service-base-url.js'
 export { createServiceClient } from './service-client/index.js'
 export {
+  SUBMITTED_STATUS,
+  createSubmissionClient
+} from './submission-client/index.js'
+export {
   CIRCUIT_STATES,
   CircuitBreaker,
   CircuitOpenError

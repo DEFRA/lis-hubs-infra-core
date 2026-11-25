@@ -112,6 +112,54 @@ so a caller that wants them in a log line must put them in the message or `logge
 Locally, lis-dev's `lis-fake-sts` service stands in for AWS STS. See
 [Service-to-service auth](https://github.com/DEFRA/lis-dev#service-to-service-auth) in lis-dev.
 
+#### Submissions
+
+A be4fe built on the shared submissions SDK (`Defra.Livestock.Sdk.Submissions`) serves the same
+`submission/...` endpoints: a holding's unsent submission and the animals in it. Use
+`createSubmissionClient` in place of `createServiceClient` for such a be4fe. It takes the same
+options and returns the same `get`, `post`, `put`, `patch` and `delete`, for the be4fe's other
+endpoints, with the submission endpoints as functions:
+
+```js
+import {
+  SUBMITTED_STATUS,
+  createSubmissionClient
+} from '@defra/lis-hubs-infra-core'
+
+const be4fe = createSubmissionClient({
+  environment,
+  serviceName: 'lis-be4fe-cattle-death',
+  apiKey
+})
+
+const { submissionId, status, animals } = await be4fe.startSubmission({ cph })
+const sent = status === SUBMITTED_STATUS
+```
+
+The submission functions are:
+
+- `startSubmission({ cph })`: starts the holding's submission, or continues the one it has not
+  sent
+- `getSubmission({ cph, submissionId })`: its `status`, `createdDate` and `animals` (each an
+  `animalId` and `status`), in the order they were last saved
+- `submit({ cph, submissionId })`: sends it; a sent submission has the status `SUBMITTED_STATUS`
+- `getAnimal({ cph, submissionId, animalId })`: the animal's `status` and its `data`, a list of
+  `{ key, value, type }` answers
+- `saveAnimal({ cph, submissionId, animalId, previousAnimalId, status, data })`: replaces the
+  animal, adding it on its first save; when `previousAnimalId` is another id, the animal is
+  taken out from under it afterwards. These are two calls: if the second fails, the animal is
+  left under both ids and the failure is thrown
+- `removeAnimal({ cph, submissionId, animalId })`: takes the animal out; one already gone is
+  left gone
+
+The be4fe stores whatever it is given, so validate before a save, and translate between your
+page's answers and `data` in the spoke. A submission or animal the be4fe does not hold under
+the holding is thrown as a [Boom](https://hapi.dev/module/boom/) not found, with the service
+client's error as its `cause`; any other failure is thrown as the service client throws it. A
+CPH that is not three parts, or an id that is empty, `.`, `..` or (for a submission) `start`, is
+thrown as not found without calling the be4fe, since such a path would resolve to another
+endpoint.
+
 ### Hub proxy
 
 `createProxyPlugin` is used by hubs. It registers a proxy route for every module that
