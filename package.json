@@ -41,8 +41,8 @@
     "pino-pretty": "13.2.0"
   },
   "devDependencies": {
-    "@defra/lis-hubs-infra-registry": "^0.13.9",
-    "@defra/lis-infra-eslint-config": "^0.14.0",
+    "@defra/lis-hubs-infra-registry": "^0.13.12",
+    "@defra/lis-infra-eslint-config": "^0.14.2",
     "@types/node": "^26.6.6",
     "@vitest/coverage-istanbul": "^5.1.1",
     "audit-ci": "^7.1.0",
