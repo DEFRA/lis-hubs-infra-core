@@ -12,5 +12,4 @@ coverage
 tsconfig.tsbuildinfo
 .env
 .npmrc
-.cake/
 artifacts

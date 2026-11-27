@@ -197,9 +197,10 @@ Each module is a `Spoke`, which owns the module's service name, base URL and
 [circuit breaker](#circuit-breaker) and builds the h2o2 routes. A spoke that does not answer within
 `proxyTimeout` gets a 504; one that cannot be reached, a 502.
 
-A spoke gets one route per registry mount (`/holdings/{cph*3}/cattle/{path*}`,
-`/animals/cattle/{path*}`), under which the request path is forwarded unchanged, so the spoke
-registers the same full patterns and sees the URL the browser asked for. hapi matches routes by specificity, not registration order, so
+A spoke gets one route per registry mount, the mount's pattern followed by `/{path*}` (for
+cattle-home, `/holdings/{cph*3}/cattle/{path*}`, `/animals/cattle/{path*}` and
+`/assets/cattle-home/{path*}` for its static assets). The request path is forwarded unchanged, so
+the spoke registers the same full patterns and sees the URL the browser asked for. hapi matches routes by specificity, not registration order, so
 `/holdings/12/345/0001/cattle/register` reaches cattle-register, not cattle-home.
 
 ### Circuit breaker
@@ -290,13 +291,21 @@ Before releasing a change, also run the tests of each consuming repo against the
 
 ## Pipelines
 
-Build, versioning and publishing run in GitHub Actions (`.github/workflows`) using Cake scripts (`*.cake`):
+Build, versioning and publishing run in GitHub Actions (`.github/workflows`), using the shared
+actions from [lis-github-actions](https://github.com/DEFRA/lis-github-actions):
 
-- **Pull request to `main`**: validate (format, lint, test), Sonar analysis, version check
-- **Push to a `feature/` or `hotfix/` branch**: prerelease version and tag
-- **Merge to `main`**: release tag, then publish to [npm](https://www.npmjs.com/package/@defra/lis-hubs-infra-core)
+- **Pull request to `main`** (`pull-request.yml`): calculate the version, build, test and pack,
+  and Sonar analysis
+- **Push to a `feature/` or `hotfix/` branch** (`prerelease.yml`): the same, then a prerelease
+  tag if the Sonar quality gate passes
+- **Merge to `main`** (`release.yml`): the same, then a release tag if the Sonar quality gate
+  passes
+- **Version tag pushed** (`publish.yml`): publish the package built for that tag to
+  [npm](https://www.npmjs.com/package/@defra/lis-hubs-infra-core); a prerelease goes under the
+  `alpha` dist-tag, so consumers only get it by asking for that exact version
 
-Versions come from git tags (SemVer). After a merge, wait for the publish job to finish before bumping the package in consuming repos.
+Versions come from git tags (SemVer). After a merge, wait for the publish job to finish before
+bumping the package in consuming repos.
 
 ## Branching policy
 

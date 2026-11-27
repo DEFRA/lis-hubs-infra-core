@@ -13,6 +13,7 @@ permissions:
   actions: read
   contents: read
   id-token: write
+  pull-requests: read
 
 jobs:
   publish:
@@ -22,6 +23,6 @@ jobs:
     environment: release
     steps:
       - name: Publish npm package
-        uses: DEFRA/lis-github-actions/actions/publish-npm@90a6d6da2ab2d9caaf7ac11ef878017b51c09fd2 # v0.10.0
+        uses: DEFRA/lis-github-actions/actions/publish-npm@5f5557f64c1344efb6ed44e482452f9cfe6bea51 # v0.11.0
         with:
           version: ${{ github.ref_name }}
